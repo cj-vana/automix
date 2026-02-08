@@ -105,13 +105,13 @@ jobs:
       contents: write
     steps:
       - name: Download AU artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: AutoMix-AU-macOS
           path: AutoMix-AU
 
       - name: Download Standalone artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: AutoMix-Standalone-macOS
           path: AutoMix-Standalone
