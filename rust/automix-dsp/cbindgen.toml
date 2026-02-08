@@ -1,0 +1,14 @@
+language = "C"
+pragma_once = true
+include_guard = "AUTOMIX_DSP_H"
+documentation_style = "c99"
+style = "both"
+
+[export]
+prefix = ""
+
+[parse]
+parse_deps = false
+
+[fn]
+rename_args = "None"

@@ -1,0 +1,43 @@
+# Plan file (local only)
+PLAN.md
+
+# Build output
+build/
+cmake-build-*/
+
+# Rust
+rust/automix-dsp/target/
+rust/automix-aes67/target/
+
+# Generated headers
+generated/
+
+# IDE
+.idea/
+.vscode/
+*.xcworkspace/
+*.xcuserdata/
+*.xcodeproj/xcuserdata/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# JUCE
+Builds/
+JuceLibraryCode/
+
+# Packaging
+*.pkg
+*.dmg
+*.zip
+
+# OS
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Secrets (never commit)
+*.p12
+*.pem
+*.key

@@ -1,0 +1,130 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  BUILD_TYPE: Release
+
+jobs:
+  rust-tests:
+    name: Rust DSP Tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/automix-dsp/target
+          key: rust-${{ runner.os }}-${{ hashFiles('rust/automix-dsp/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path rust/automix-dsp/Cargo.toml --verbose
+
+      - name: Run Rust benchmarks (compile check)
+        run: cargo bench --manifest-path rust/automix-dsp/Cargo.toml --no-run
+
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-14
+    needs: rust-tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install tools
+        run: |
+          brew install ninja
+          cargo install cbindgen
+
+      - name: Cache build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: macos-build-${{ hashFiles('CMakeLists.txt', 'rust/**', 'source/**') }}
+          restore-keys: macos-build-
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
+
+      - name: Run C++ tests (Catch2)
+        run: ctest --test-dir build --output-on-failure -C ${{ env.BUILD_TYPE }}
+
+      - name: Upload AU artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoMix-AU-macOS
+          path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/AU/
+
+      - name: Upload Standalone artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoMix-Standalone-macOS
+          path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/Standalone/
+
+  release:
+    name: Create Release
+    runs-on: macos-14
+    needs: build-macos
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download AU artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoMix-AU-macOS
+          path: AutoMix-AU
+
+      - name: Download Standalone artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoMix-Standalone-macOS
+          path: AutoMix-Standalone
+
+      - name: Package artifacts
+        run: |
+          zip -r AutoMix-AU-macOS.zip AutoMix-AU/
+          zip -r AutoMix-Standalone-macOS.zip AutoMix-Standalone/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AutoMix-AU-macOS.zip
+            AutoMix-Standalone-macOS.zip
+          generate_release_notes: true

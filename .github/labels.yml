@@ -1,0 +1,106 @@
+# Labels for automated management via github-labeler action
+# Run: gh label create "name" --description "desc" --color "color"
+
+- name: "bug"
+  color: "d73a4a"
+  description: "Something isn't working"
+
+- name: "enhancement"
+  color: "a2eeef"
+  description: "New feature or request"
+
+- name: "triage"
+  color: "ededed"
+  description: "Needs investigation"
+
+- name: "dsp"
+  color: "7057ff"
+  description: "DSP / Rust audio processing"
+
+- name: "gui"
+  color: "0075ca"
+  description: "GUI / visual components"
+
+- name: "plugin"
+  color: "008672"
+  description: "AU plugin wrapper / DAW compatibility"
+
+- name: "standalone"
+  color: "006b75"
+  description: "Standalone application"
+
+- name: "aes67"
+  color: "5319e7"
+  description: "AES67 / network audio"
+
+- name: "ci"
+  color: "fbca04"
+  description: "CI/CD pipeline"
+
+- name: "dependencies"
+  color: "0366d6"
+  description: "Dependency updates"
+
+- name: "rust"
+  color: "dea584"
+  description: "Rust crate changes"
+
+- name: "c++"
+  color: "f9d0c4"
+  description: "C++ / JUCE changes"
+
+- name: "submodule"
+  color: "c5def5"
+  description: "Git submodule updates"
+
+- name: "documentation"
+  color: "0075ca"
+  description: "Documentation improvements"
+
+- name: "performance"
+  color: "ff7619"
+  description: "Performance optimization"
+
+- name: "good first issue"
+  color: "7057ff"
+  description: "Good for newcomers"
+
+- name: "help wanted"
+  color: "008672"
+  description: "Extra attention is needed"
+
+- name: "wontfix"
+  color: "ffffff"
+  description: "This will not be worked on"
+
+- name: "duplicate"
+  color: "cfd3d7"
+  description: "This issue or PR already exists"
+
+- name: "breaking-change"
+  color: "b60205"
+  description: "Introduces a breaking change"
+
+- name: "phase-0"
+  color: "e4e669"
+  description: "Phase 0: Scaffolding"
+
+- name: "phase-1"
+  color: "bfd4f2"
+  description: "Phase 1: Core DSP Engine"
+
+- name: "phase-2"
+  color: "d4c5f9"
+  description: "Phase 2: JUCE Integration"
+
+- name: "phase-3"
+  color: "f9d0c4"
+  description: "Phase 3: GUI"
+
+- name: "phase-4"
+  color: "c2e0c6"
+  description: "Phase 4: CI/CD"
+
+- name: "phase-5"
+  color: "fef2c0"
+  description: "Phase 5: AES67"

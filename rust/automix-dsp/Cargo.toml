@@ -1,0 +1,19 @@
+[package]
+name = "automix-dsp"
+version = "0.1.0"
+edition = "2021"
+description = "Dugan-style automixer DSP core"
+license = "MIT"
+
+[lib]
+crate-type = ["staticlib"]
+name = "automix_dsp"
+
+[dependencies]
+
+[build-dependencies]
+cbindgen = "0.27"
+
+[dev-dependencies]
+approx = "0.5"
+proptest = "1"
