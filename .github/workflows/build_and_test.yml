@@ -20,7 +20,7 @@ jobs:
     name: Rust DSP Tests
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -50,7 +50,7 @@ jobs:
     runs-on: macos-14
     needs: rust-tests
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
