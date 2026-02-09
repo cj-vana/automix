@@ -107,3 +107,9 @@ set_automix_warnings(AutoMix)
 if(APPLE)
     target_link_libraries(AutoMix PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
+
+# ---- Tests ----
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
