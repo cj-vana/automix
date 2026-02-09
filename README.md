@@ -1,20 +1,21 @@
 # AutoMix
 
-A professional Dugan-style automatic microphone mixer for macOS, available as an AU plugin and standalone application.
+**Automatic microphone mixer for macOS**
 
-## What is AutoMix?
+![Build](https://github.com/cj-vana/automix/actions/workflows/build_and_test.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.1-green.svg)
+![macOS](https://img.shields.io/badge/platform-macOS_12%2B-lightgrey.svg)
 
-AutoMix automatically manages the gain of multiple microphone inputs using the Dugan gain-sharing algorithm. When a speaker talks into their microphone, that channel's gain increases while inactive channels are attenuated -- all while maintaining constant system gain. This eliminates manual fader riding in:
+---
 
-- Live broadcast panels
-- Conference rooms
-- Theater productions
-- Podcast recording
-- House of worship
+AutoMix automatically manages the gain of multiple microphone inputs using a gain-sharing algorithm. When someone talks, their mic opens up while inactive channels are attenuated — all while maintaining constant system gain. No more manual fader riding.
+
+**Built for:** live broadcast panels, conference rooms, theater, podcasts, house of worship
 
 ## Features
 
-- **Dugan gain-sharing algorithm** with configurable per-channel weights
+- **Gain-sharing algorithm** with configurable per-channel weights
 - **Up to 32 input channels** with independent controls
 - **NOM (Number of Open Mics) attenuation** for feedback control
 - **Adaptive noise floor tracking** that adjusts to room conditions
@@ -27,44 +28,61 @@ AutoMix automatically manages the gain of multiple microphone inputs using the D
 
 ## Architecture
 
-AutoMix uses a hybrid architecture:
-- **JUCE 8** (C++) for the plugin wrapper, GUI, and audio I/O
-- **Rust** for the DSP core via C FFI -- memory-safe, zero-allocation audio processing
+```
+┌─────────────────────────────────────────────────┐
+│  JUCE 8 (C++)                                   │
+│  Plugin wrapper · GUI · Audio I/O               │
+│                                                 │
+│    float* const* ──► FFI ──► float* const*      │
+│                                                 │
+│  ┌─────────────────────────────────────────┐    │
+│  │  Rust DSP Core                          │    │
+│  │  9-phase gain-sharing pipeline          │    │
+│  │  Zero allocation · Memory safe          │    │
+│  └─────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+```bash
+# Prerequisites
+brew install cmake ninja
+cargo install cbindgen
+
+# Clone, build, and run
+git clone --recursive https://github.com/cj-vana/automix.git
+cd automix
+./dev.sh
+```
 
 ## Building
 
-### Prerequisites
-
 ```bash
-brew install cmake ninja
-cargo install cbindgen
-```
-
-### Build
-
-```bash
-git clone --recursive https://github.com/yourusername/automix.git
-cd automix
+# Full build (universal binary: arm64 + x86_64)
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-### Test
-
-```bash
-# Rust DSP unit tests
-cargo test --manifest-path rust/automix-dsp/Cargo.toml
-
-# C++ integration tests
-ctest --test-dir build --output-on-failure
-```
-
 ### Output
 
-After building, you'll find:
-- **AU Plugin**: `build/AutoMix_artefacts/Release/AU/AutoMix.component`
-- **Standalone App**: `build/AutoMix_artefacts/Release/Standalone/AutoMix.app`
+| Artifact | Path |
+|----------|------|
+| AU Plugin | `build/AutoMix_artefacts/Release/AU/AutoMix.component` |
+| Standalone App | `build/AutoMix_artefacts/Release/Standalone/AutoMix.app` |
+
+### Testing
+
+```bash
+cargo test --manifest-path rust/automix-dsp/Cargo.toml   # Rust DSP tests
+ctest --test-dir build --output-on-failure                # C++ integration tests
+cargo miri test --manifest-path rust/automix-dsp/Cargo.toml  # Memory safety
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, branch model, and PR guidelines.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
