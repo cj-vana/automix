@@ -108,6 +108,7 @@ target_sources(AutoMix
         source/PluginProcessor.h
         source/PluginEditor.cpp
         source/PluginEditor.h
+        source/Parameters.h
 )
 
 target_include_directories(AutoMix

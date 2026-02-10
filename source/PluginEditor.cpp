@@ -6,9 +6,24 @@ AutomixEditor::AutomixEditor (AutomixProcessor& p)
     setSize (1200, 700);
     setResizable (true, true);
     setResizeLimits (800, 400, 2400, 1400);
+
+    startTimerHz (30);
 }
 
-AutomixEditor::~AutomixEditor() = default;
+AutomixEditor::~AutomixEditor()
+{
+    stopTimer();
+}
+
+void AutomixEditor::timerCallback()
+{
+    for (int ch = 0; ch < AutomixProcessor::kMaxChannels; ++ch)
+        channelMeters_[ch] = processor_.getChannelMeterData (ch);
+
+    globalMeter_ = processor_.getGlobalMeterData();
+
+    repaint();
+}
 
 void AutomixEditor::paint (juce::Graphics& g)
 {
@@ -20,8 +35,12 @@ void AutomixEditor::paint (juce::Graphics& g)
                 juce::Justification::centred, true);
 
     g.setFont (14.0f);
-    g.drawText ("Dugan-Style Automixer — Phase 0 Scaffold",
-                getLocalBounds().reduced (20),
+    auto info = juce::String::formatted (
+        "Dugan-Style Automixer \xe2\x80\x94 v%s \xe2\x80\x94 %d active channels \xe2\x80\x94 NOM: %.1f",
+        AUTOMIX_VERSION,
+        processor_.getActiveChannelCount(),
+        globalMeter_.nomCount);
+    g.drawText (info, getLocalBounds().reduced (20),
                 juce::Justification::centred, true);
 }
 
