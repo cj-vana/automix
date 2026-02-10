@@ -4,7 +4,7 @@
 
 ![Build](https://github.com/cj-vana/automix/actions/workflows/build_and_test.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.1.1-green.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-green.svg)
 ![macOS](https://img.shields.io/badge/platform-macOS_12%2B-lightgrey.svg)
 
 ---
@@ -78,6 +78,12 @@ cargo test --manifest-path rust/automix-dsp/Cargo.toml   # Rust DSP tests
 ctest --test-dir build --output-on-failure                # C++ integration tests
 cargo miri test --manifest-path rust/automix-dsp/Cargo.toml  # Memory safety
 ```
+
+## DAW Setup
+
+- **Standalone app** — Works out of the box with any multi-channel audio interface
+- **Logic Pro** — Requires surround bus routing. See [Logic Pro Setup Guide](docs/logic-pro-setup.md)
+- **REAPER** — Route tracks to a single multi-channel track with AutoMix inserted
 
 ## Contributing
 
