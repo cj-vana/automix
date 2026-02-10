@@ -83,5 +83,9 @@ GitHub Actions (`.github/workflows/build_and_test.yml`): runs on `main` and `dev
 - **Plugin validation**: pluginval at strictness 10
 - **Memory safety**: `cargo miri test`
 
-## macOS Linking
-When linking Rust staticlib on macOS, CMake adds `-framework Security -framework CoreFoundation` (required by Rust std).
+## macOS Build
+- Universal binary (arm64 + x86_64) built by driving `cargo build` for each Rust target and combining with `lipo`
+- Corrosion was removed — it doesn't support macOS universal binaries. CMake drives cargo directly.
+- `CMAKE_OSX_ARCHITECTURES` must be set **before** `project()` so CMake picks it up
+- CMake adds `-framework Security -framework CoreFoundation` (required by Rust std)
+- Both Rust targets must be installed: `rustup target add x86_64-apple-darwin aarch64-apple-darwin`
