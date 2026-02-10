@@ -81,9 +81,9 @@ cargo miri test --manifest-path rust/automix-dsp/Cargo.toml  # Memory safety
 
 ## DAW Setup
 
-- **Standalone app** — Works out of the box with any multi-channel audio interface
-- **Logic Pro** — Requires surround bus routing. See [Logic Pro Setup Guide](docs/logic-pro-setup.md)
-- **REAPER** — Route tracks to a single multi-channel track with AutoMix inserted
+- **Standalone app (recommended)** — Works out of the box with any multi-channel audio interface
+- **REAPER** — Native multi-channel routing. Route tracks to a single multi-channel track with AutoMix inserted
+- **Logic Pro** — Use the standalone app; Logic's routing model doesn't support multi-channel effect plugins well. See [DAW Setup Guide](docs/logic-pro-setup.md)
 
 ## Contributing
 
