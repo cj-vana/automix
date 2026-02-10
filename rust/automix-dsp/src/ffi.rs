@@ -1,5 +1,5 @@
 use crate::engine::AutomixEngine;
-use std::ffi::c_float;
+use std::ffi::{c_char, c_float};
 
 /// C-compatible channel metering struct.
 #[repr(C)]
@@ -22,6 +22,9 @@ pub struct AutomixGlobalMetering {
 
 /// Create a new AutomixEngine instance.
 /// Returns an opaque pointer that must be freed with `automix_destroy`.
+///
+/// # Safety
+/// Caller must eventually pass the returned pointer to `automix_destroy`.
 #[no_mangle]
 pub unsafe extern "C" fn automix_create(
     num_channels: u32,
@@ -33,6 +36,9 @@ pub unsafe extern "C" fn automix_create(
 }
 
 /// Destroy an AutomixEngine instance and free its memory.
+///
+/// # Safety
+/// `engine` must be a pointer returned by `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_destroy(engine: *mut AutomixEngine) {
     if !engine.is_null() {
@@ -44,6 +50,11 @@ pub unsafe extern "C" fn automix_destroy(engine: *mut AutomixEngine) {
 
 /// Process a block of audio in-place.
 /// `channel_ptrs`: array of `num_channels` pointers, each to `num_samples` f32 values.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`. `channel_ptrs` must
+/// point to an array of at least `num_channels` valid pointers, each pointing
+/// to at least `num_samples` f32 values. Null pointers are handled gracefully.
 #[no_mangle]
 pub unsafe extern "C" fn automix_process(
     engine: *mut AutomixEngine,
@@ -62,13 +73,16 @@ pub unsafe extern "C" fn automix_process(
 
 /// Returns a pointer to a null-terminated version string.
 #[no_mangle]
-pub extern "C" fn automix_version() -> *const u8 {
-    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr()
+pub extern "C" fn automix_version() -> *const c_char {
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
 }
 
 // ---- Parameter Setters ----
 
 /// Set the weight for a channel (linear, 0.0–1.0).
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_channel_weight(
     engine: *mut AutomixEngine,
@@ -82,6 +96,9 @@ pub unsafe extern "C" fn automix_set_channel_weight(
 }
 
 /// Set the mute state for a channel.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_channel_mute(
     engine: *mut AutomixEngine,
@@ -95,6 +112,9 @@ pub unsafe extern "C" fn automix_set_channel_mute(
 }
 
 /// Set the solo state for a channel.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_channel_solo(
     engine: *mut AutomixEngine,
@@ -108,6 +128,9 @@ pub unsafe extern "C" fn automix_set_channel_solo(
 }
 
 /// Set the bypass state for a channel.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_channel_bypass(
     engine: *mut AutomixEngine,
@@ -121,6 +144,9 @@ pub unsafe extern "C" fn automix_set_channel_bypass(
 }
 
 /// Set the global bypass state. When bypassed, audio passes through unmodified.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_global_bypass(engine: *mut AutomixEngine, bypass: bool) {
     if engine.is_null() {
@@ -130,6 +156,9 @@ pub unsafe extern "C" fn automix_set_global_bypass(engine: *mut AutomixEngine, b
 }
 
 /// Set the gain smoothing attack time in milliseconds.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_attack_ms(engine: *mut AutomixEngine, ms: c_float) {
     if engine.is_null() {
@@ -139,6 +168,9 @@ pub unsafe extern "C" fn automix_set_attack_ms(engine: *mut AutomixEngine, ms: c
 }
 
 /// Set the gain smoothing release time in milliseconds.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_release_ms(engine: *mut AutomixEngine, ms: c_float) {
     if engine.is_null() {
@@ -148,6 +180,9 @@ pub unsafe extern "C" fn automix_set_release_ms(engine: *mut AutomixEngine, ms: 
 }
 
 /// Set the last-mic-hold time in milliseconds.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_set_hold_time_ms(engine: *mut AutomixEngine, ms: c_float) {
     if engine.is_null() {
@@ -157,11 +192,11 @@ pub unsafe extern "C" fn automix_set_hold_time_ms(engine: *mut AutomixEngine, ms
 }
 
 /// Enable or disable NOM attenuation.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
 #[no_mangle]
-pub unsafe extern "C" fn automix_set_nom_atten_enabled(
-    engine: *mut AutomixEngine,
-    enabled: bool,
-) {
+pub unsafe extern "C" fn automix_set_nom_atten_enabled(engine: *mut AutomixEngine, enabled: bool) {
     if engine.is_null() {
         return;
     }
@@ -172,6 +207,10 @@ pub unsafe extern "C" fn automix_set_nom_atten_enabled(
 
 /// Get metering data for a single channel.
 /// Returns true on success, false if engine is null or channel out of range.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
+/// `out` must point to a valid `AutomixChannelMetering` struct, or be null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_get_channel_metering(
     engine: *const AutomixEngine,
@@ -196,6 +235,10 @@ pub unsafe extern "C" fn automix_get_channel_metering(
 
 /// Get global metering data.
 /// Returns true on success, false if engine or out pointer is null.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
+/// `out` must point to a valid `AutomixGlobalMetering` struct, or be null.
 #[no_mangle]
 pub unsafe extern "C" fn automix_get_global_metering(
     engine: *const AutomixEngine,
@@ -214,6 +257,10 @@ pub unsafe extern "C" fn automix_get_global_metering(
 /// Get metering data for all channels at once.
 /// `out` must point to an array of at least `max_channels` `AutomixChannelMetering` structs.
 /// Returns the number of channels written.
+///
+/// # Safety
+/// `engine` must be a valid pointer from `automix_create`, or null.
+/// `out` must point to an array of at least `max_channels` `AutomixChannelMetering` structs.
 #[no_mangle]
 pub unsafe extern "C" fn automix_get_all_channel_metering(
     engine: *const AutomixEngine,

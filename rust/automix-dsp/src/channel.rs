@@ -1,4 +1,6 @@
-use crate::constants::{DEFAULT_ATTACK_MS, DEFAULT_RELEASE_MS, DEFAULT_RMS_WINDOW_MS, DEFAULT_WEIGHT};
+use crate::constants::{
+    DEFAULT_ATTACK_MS, DEFAULT_RELEASE_MS, DEFAULT_RMS_WINDOW_MS, DEFAULT_WEIGHT,
+};
 use crate::level_detector::LevelDetector;
 use crate::math_utils::linear_to_db;
 use crate::noise_floor::NoiseFloorTracker;
@@ -62,7 +64,6 @@ pub struct Channel {
     pub gain_smoother: OnePoleSmoother,
     pub raw_gain: f64,
     pub smoothed_gain: f64,
-    pub prev_gain: f64,
     pub is_active: bool,
     pub metering: ChannelMetering,
 }
@@ -81,7 +82,6 @@ impl Channel {
             ),
             raw_gain: 0.0,
             smoothed_gain: 0.0,
-            prev_gain: 0.0,
             is_active: false,
             metering: ChannelMetering::default(),
         }
@@ -103,7 +103,6 @@ impl Channel {
         self.gain_smoother.reset();
         self.raw_gain = 0.0;
         self.smoothed_gain = 0.0;
-        self.prev_gain = 0.0;
         self.is_active = false;
         self.metering = ChannelMetering::default();
     }
@@ -182,6 +181,5 @@ mod tests {
         let ch = Channel::new(3, 48000.0);
         assert_eq!(ch.index, 3);
         assert_eq!(ch.smoothed_gain, 0.0);
-        assert_eq!(ch.prev_gain, 0.0);
     }
 }

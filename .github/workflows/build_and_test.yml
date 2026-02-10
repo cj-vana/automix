@@ -27,7 +27,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: clippy, rustfmt
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -38,6 +38,21 @@ jobs:
             rust/automix-dsp/target
           key: rust-${{ runner.os }}-${{ hashFiles('rust/automix-dsp/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust/automix-dsp/Cargo.toml --check
+
+      - name: Check version consistency
+        run: |
+          CARGO_VERSION=$(grep '^version' rust/automix-dsp/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ "$CARGO_VERSION" != "$FILE_VERSION" ]; then
+            echo "Version mismatch: Cargo.toml=$CARGO_VERSION, VERSION=$FILE_VERSION"
+            exit 1
+          fi
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path rust/automix-dsp/Cargo.toml -- -D warnings
 
       - name: Run Rust unit tests
         run: cargo test --manifest-path rust/automix-dsp/Cargo.toml --verbose
@@ -63,6 +78,16 @@ jobs:
         run: |
           brew install ninja
           cargo install cbindgen
+
+      - name: Cache Cargo (build)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/automix-dsp/target
+          key: cargo-build-${{ runner.os }}-${{ hashFiles('rust/automix-dsp/Cargo.lock') }}
+          restore-keys: cargo-build-${{ runner.os }}-
 
       - name: Cache build
         uses: actions/cache@v4

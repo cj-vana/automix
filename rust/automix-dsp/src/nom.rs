@@ -12,6 +12,12 @@ pub struct NomAttenuation {
     enabled: bool,
 }
 
+impl Default for NomAttenuation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NomAttenuation {
     pub fn new() -> Self {
         Self {
@@ -105,6 +111,24 @@ mod tests {
         let mut n = NomAttenuation::new();
         n.update(0.5);
         // NOM < 1 should not apply attenuation
+        assert_relative_eq!(n.db(), 0.0, epsilon = 1e-10);
+        assert_relative_eq!(n.linear(), 1.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn nom_zero() {
+        let mut n = NomAttenuation::new();
+        n.update(0.0);
+        // NOM = 0 is below threshold, no attenuation
+        assert_relative_eq!(n.db(), 0.0, epsilon = 1e-10);
+        assert_relative_eq!(n.linear(), 1.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn nom_negative() {
+        let mut n = NomAttenuation::new();
+        n.update(-1.0);
+        // Negative NOM should not apply attenuation (< 1.0 guard)
         assert_relative_eq!(n.db(), 0.0, epsilon = 1e-10);
         assert_relative_eq!(n.linear(), 1.0, epsilon = 1e-10);
     }

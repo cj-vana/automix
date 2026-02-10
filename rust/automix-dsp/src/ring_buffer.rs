@@ -13,7 +13,7 @@ pub struct RingBuffer {
 
 impl RingBuffer {
     pub fn new(window_len: usize) -> Self {
-        let window_len = window_len.min(RING_BUFFER_MAX_CAPACITY).max(1);
+        let window_len = window_len.clamp(1, RING_BUFFER_MAX_CAPACITY);
         Self {
             buffer: [0.0; RING_BUFFER_MAX_CAPACITY],
             write_pos: 0,
@@ -26,6 +26,13 @@ impl RingBuffer {
     /// Push a squared sample value into the buffer.
     #[inline]
     pub fn push(&mut self, squared_sample: f64) {
+        // Defense-in-depth: reject non-finite values to protect running_sum
+        let squared_sample = if squared_sample.is_finite() {
+            squared_sample
+        } else {
+            0.0
+        };
+
         // Subtract the oldest value that will be overwritten
         let old = self.buffer[self.write_pos];
         self.running_sum -= old;
@@ -75,7 +82,7 @@ impl RingBuffer {
 
     /// Change the window length. Resets the buffer.
     pub fn set_window_len(&mut self, window_len: usize) {
-        self.window_len = window_len.min(RING_BUFFER_MAX_CAPACITY).max(1);
+        self.window_len = window_len.clamp(1, RING_BUFFER_MAX_CAPACITY);
         self.reset();
     }
 

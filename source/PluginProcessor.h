@@ -93,6 +93,20 @@ private:
 
     void syncParametersToEngine();
     void cacheMetering();
+    void invalidateParameterCache();
+
+    // Dirty-checking caches for parameter sync (avoids unnecessary FFI calls)
+    float cachedAttackMs_     = -1.0f;
+    float cachedReleaseMs_    = -1.0f;
+    float cachedHoldMs_       = -1.0f;
+    bool  cachedGlobalBypass_ = false;
+    bool  cachedNomAtten_     = true;
+    bool  cacheInitialized_   = false;
+
+    float cachedChannelWeight_[kMaxChannels]  {};
+    bool  cachedChannelMute_[kMaxChannels]    {};
+    bool  cachedChannelSolo_[kMaxChannels]    {};
+    bool  cachedChannelBypass_[kMaxChannels]  {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutomixProcessor)
 };

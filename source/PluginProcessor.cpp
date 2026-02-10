@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cstring>
 
 AutomixProcessor::AutomixProcessor()
     : AudioProcessor (BusesProperties()
@@ -54,8 +55,8 @@ void AutomixProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         static_cast<float> (sampleRate),
         static_cast<uint32_t> (samplesPerBlock));
 
-    // Push current APVTS values to the fresh engine.
-    // Handles both first-create and state-restore scenarios.
+    // Force full sync on next processBlock by invalidating the cache
+    invalidateParameterCache();
     syncParametersToEngine();
 }
 
@@ -86,24 +87,93 @@ void AutomixProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     cacheMetering();
 }
 
+static bool floatChanged (float a, float b)
+{
+    return std::memcmp (&a, &b, sizeof (float)) != 0;
+}
+
 void AutomixProcessor::syncParametersToEngine()
 {
-    // Global params
-    automix_set_global_bypass (engine_, globalBypassParam_->load (std::memory_order_relaxed) >= 0.5f);
-    automix_set_attack_ms (engine_, attackMsParam_->load (std::memory_order_relaxed));
-    automix_set_release_ms (engine_, releaseMsParam_->load (std::memory_order_relaxed));
-    automix_set_hold_time_ms (engine_, holdMsParam_->load (std::memory_order_relaxed));
-    automix_set_nom_atten_enabled (engine_, nomAttenParam_->load (std::memory_order_relaxed) >= 0.5f);
+    // Global params — only call FFI when values have changed
+    const bool globalBypass = globalBypassParam_->load (std::memory_order_relaxed) >= 0.5f;
+    if (globalBypass != cachedGlobalBypass_ || !cacheInitialized_)
+    {
+        automix_set_global_bypass (engine_, globalBypass);
+        cachedGlobalBypass_ = globalBypass;
+    }
 
-    // Per-channel params (only for active channels)
+    const float attackMs = attackMsParam_->load (std::memory_order_relaxed);
+    if (floatChanged (attackMs, cachedAttackMs_))
+    {
+        automix_set_attack_ms (engine_, attackMs);
+        cachedAttackMs_ = attackMs;
+    }
+
+    const float releaseMs = releaseMsParam_->load (std::memory_order_relaxed);
+    if (floatChanged (releaseMs, cachedReleaseMs_))
+    {
+        automix_set_release_ms (engine_, releaseMs);
+        cachedReleaseMs_ = releaseMs;
+    }
+
+    const float holdMs = holdMsParam_->load (std::memory_order_relaxed);
+    if (floatChanged (holdMs, cachedHoldMs_))
+    {
+        automix_set_hold_time_ms (engine_, holdMs);
+        cachedHoldMs_ = holdMs;
+    }
+
+    const bool nomAtten = nomAttenParam_->load (std::memory_order_relaxed) >= 0.5f;
+    if (nomAtten != cachedNomAtten_ || !cacheInitialized_)
+    {
+        automix_set_nom_atten_enabled (engine_, nomAtten);
+        cachedNomAtten_ = nomAtten;
+    }
+
+    // Per-channel params (only for active channels, only when changed)
     const auto numCh = static_cast<uint32_t> (getTotalNumInputChannels());
     for (uint32_t ch = 0; ch < numCh && ch < static_cast<uint32_t> (kMaxChannels); ++ch)
     {
-        automix_set_channel_weight (engine_, ch, channelWeightParams_[ch]->load (std::memory_order_relaxed));
-        automix_set_channel_mute (engine_, ch, channelMuteParams_[ch]->load (std::memory_order_relaxed) >= 0.5f);
-        automix_set_channel_solo (engine_, ch, channelSoloParams_[ch]->load (std::memory_order_relaxed) >= 0.5f);
-        automix_set_channel_bypass (engine_, ch, channelBypassParams_[ch]->load (std::memory_order_relaxed) >= 0.5f);
+        const float weight = channelWeightParams_[ch]->load (std::memory_order_relaxed);
+        if (floatChanged (weight, cachedChannelWeight_[ch]))
+        {
+            automix_set_channel_weight (engine_, ch, weight);
+            cachedChannelWeight_[ch] = weight;
+        }
+
+        const bool muted = channelMuteParams_[ch]->load (std::memory_order_relaxed) >= 0.5f;
+        if (muted != cachedChannelMute_[ch] || !cacheInitialized_)
+        {
+            automix_set_channel_mute (engine_, ch, muted);
+            cachedChannelMute_[ch] = muted;
+        }
+
+        const bool soloed = channelSoloParams_[ch]->load (std::memory_order_relaxed) >= 0.5f;
+        if (soloed != cachedChannelSolo_[ch] || !cacheInitialized_)
+        {
+            automix_set_channel_solo (engine_, ch, soloed);
+            cachedChannelSolo_[ch] = soloed;
+        }
+
+        const bool bypassed = channelBypassParams_[ch]->load (std::memory_order_relaxed) >= 0.5f;
+        if (bypassed != cachedChannelBypass_[ch] || !cacheInitialized_)
+        {
+            automix_set_channel_bypass (engine_, ch, bypassed);
+            cachedChannelBypass_[ch] = bypassed;
+        }
     }
+
+    cacheInitialized_ = true;
+}
+
+void AutomixProcessor::invalidateParameterCache()
+{
+    cacheInitialized_ = false;
+    cachedAttackMs_  = -1.0f;
+    cachedReleaseMs_ = -1.0f;
+    cachedHoldMs_    = -1.0f;
+    for (int ch = 0; ch < kMaxChannels; ++ch)
+        cachedChannelWeight_[ch] = -1.0f;
 }
 
 void AutomixProcessor::cacheMetering()

@@ -15,7 +15,6 @@ pub struct NoiseFloorTracker {
     floor_level: f64,
     smoother: OnePoleSmoother,
     margin_linear: f64,
-    initialized: bool,
 }
 
 impl NoiseFloorTracker {
@@ -36,7 +35,6 @@ impl NoiseFloorTracker {
             floor_level: init_linear,
             smoother,
             margin_linear: db_to_linear(DEFAULT_NOISE_FLOOR_MARGIN_DB),
-            initialized: false,
         }
     }
 
@@ -46,10 +44,6 @@ impl NoiseFloorTracker {
     /// significantly above the current floor (active speech), the floor
     /// is not pulled upward.
     pub fn update(&mut self, rms_linear: f64) {
-        if !self.initialized {
-            self.initialized = true;
-        }
-
         // Only track toward the input if it's below or near the current floor.
         // If the signal is well above the floor (active speech), don't follow it up.
         if rms_linear < self.floor_level * self.margin_linear {
@@ -88,7 +82,6 @@ impl NoiseFloorTracker {
             sample_rate,
         );
         self.smoother.set_immediate(init_linear);
-        self.initialized = false;
     }
 
     /// Set the margin in dB.

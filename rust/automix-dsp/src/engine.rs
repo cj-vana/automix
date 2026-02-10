@@ -32,7 +32,7 @@ pub struct AutomixEngine {
     params: EngineParams,
     last_mic_hold: LastMicHold,
     nom_atten: NomAttenuation,
-    pub global_metering: GlobalMetering,
+    pub(crate) global_metering: GlobalMetering,
     sample_counter: u64,
     // Pre-allocated scratch arrays (no heap alloc in process path)
     rms_levels: [f64; AUTOMIX_MAX_CHANNELS],
@@ -103,9 +103,7 @@ impl AutomixEngine {
         let channel_ptrs_slice = std::slice::from_raw_parts(channel_ptrs, num_ch);
 
         // --- Phase 0: Determine participation flags ---
-        let any_solo = self.channels[..num_ch]
-            .iter()
-            .any(|ch| ch.params.soloed);
+        let any_solo = self.channels[..num_ch].iter().any(|ch| ch.params.soloed);
 
         for i in 0..num_ch {
             self.participating[i] = self.channels[i].params.is_participating(any_solo);
@@ -113,6 +111,7 @@ impl AutomixEngine {
         }
 
         // --- Phase 1: RMS level detection ---
+        #[allow(clippy::needless_range_loop)]
         for i in 0..num_ch {
             let samples = std::slice::from_raw_parts(channel_ptrs_slice[i], num_samples);
             self.rms_levels[i] = self.channels[i].level_detector.process_block(samples);
@@ -136,12 +135,9 @@ impl AutomixEngine {
         }
 
         // --- Phase 4: Last-mic-hold evaluation ---
-        let hold_channel = self.last_mic_hold.update(
-            &self.is_active,
-            &self.participating,
-            num_ch,
-            num_samples,
-        );
+        let hold_channel =
+            self.last_mic_hold
+                .update(&self.is_active, &self.participating, num_ch, num_samples);
 
         // --- Phase 5: Dugan gain-sharing ---
         let result = compute_dugan_gains(
@@ -160,6 +156,7 @@ impl AutomixEngine {
         // --- Phase 7+8: Per-sample gain smoothing and application ---
         // Compute target gain per channel, then apply the one-pole smoother
         // per-sample while writing the gain-adjusted audio.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..num_ch {
             let target_gain = if self.participating[i] {
                 result.gains[i] * nom_linear
@@ -179,8 +176,9 @@ impl AutomixEngine {
             } else {
                 let buf = std::slice::from_raw_parts_mut(channel_ptrs_slice[i], num_samples);
                 for sample in buf.iter_mut() {
+                    let s = if sample.is_finite() { *sample } else { 0.0 };
                     let gain = self.channels[i].gain_smoother.process(target_gain);
-                    *sample *= gain as f32;
+                    *sample = s * gain as f32;
                 }
                 self.channels[i].smoothed_gain = self.channels[i].gain_smoother.current();
             }
@@ -259,10 +257,7 @@ impl AutomixEngine {
 
     // ---- Metering getters ----
 
-    pub fn channel_metering(
-        &self,
-        channel: usize,
-    ) -> Option<&crate::channel::ChannelMetering> {
+    pub fn channel_metering(&self, channel: usize) -> Option<&crate::channel::ChannelMetering> {
         if channel < self.num_channels {
             Some(&self.channels[channel].metering)
         } else {
@@ -420,5 +415,65 @@ mod tests {
     fn version_string() {
         let v = AutomixEngine::version();
         assert!(!v.is_empty());
+    }
+
+    #[test]
+    fn nan_input_produces_finite_output() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+
+        // First converge with normal audio
+        for _ in 0..100 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        // Inject NaN
+        let mut nan_buf = vec![vec![f32::NAN; 256], vec![0.3_f32; 256]];
+        unsafe { process_test_block(&mut engine, &mut nan_buf, 256) };
+
+        // All outputs should be finite
+        for ch in &nan_buf {
+            for &s in ch {
+                assert!(
+                    s.is_finite(),
+                    "Output sample is not finite after NaN injection"
+                );
+            }
+        }
+
+        // Engine should recover: process more normal audio
+        for _ in 0..100 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+            for ch in &buffers {
+                for &s in ch {
+                    assert!(s.is_finite(), "Output sample is not finite after recovery");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inf_input_produces_finite_output() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+
+        // Converge
+        for _ in 0..100 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        // Inject Inf and -Inf
+        let mut inf_buf = vec![vec![f32::INFINITY; 256], vec![f32::NEG_INFINITY; 256]];
+        unsafe { process_test_block(&mut engine, &mut inf_buf, 256) };
+
+        for ch in &inf_buf {
+            for &s in ch {
+                assert!(
+                    s.is_finite(),
+                    "Output sample is not finite after Inf injection"
+                );
+            }
+        }
     }
 }

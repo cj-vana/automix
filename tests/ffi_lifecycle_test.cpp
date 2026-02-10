@@ -43,10 +43,7 @@ TEST_CASE ("Process null channel_ptrs is safe", "[lifecycle]")
 
 TEST_CASE ("Version string is valid", "[lifecycle]")
 {
-    const uint8_t* version = automix_version();
+    const char* version = automix_version();
     REQUIRE (version != nullptr);
-
-    // Version should be a non-empty null-terminated string
-    const char* vstr = reinterpret_cast<const char*> (version);
-    REQUIRE (std::strlen (vstr) > 0);
+    REQUIRE (std::strlen (version) > 0);
 }

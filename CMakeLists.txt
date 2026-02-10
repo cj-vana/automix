@@ -49,6 +49,14 @@ foreach(_arch IN LISTS CMAKE_OSX_ARCHITECTURES)
     )
 endforeach()
 
+# Collect Rust sources for dependency tracking
+file(GLOB_RECURSE RUST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/src/*.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/Cargo.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/Cargo.lock"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/cbindgen.toml"
+)
+
 list(LENGTH CMAKE_OSX_ARCHITECTURES _num_archs)
 if(_num_archs GREATER 1)
     add_custom_command(
@@ -56,6 +64,7 @@ if(_num_archs GREATER 1)
         ${_cargo_commands}
         COMMAND lipo -create ${_lib_paths} -output "${AUTOMIX_RUST_OUTPUT}"
         COMMENT "Building universal Rust static library (${CMAKE_OSX_ARCHITECTURES})"
+        DEPENDS ${RUST_SOURCES}
         VERBATIM
     )
 else()
@@ -64,11 +73,18 @@ else()
         ${_cargo_commands}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_lib_paths} "${AUTOMIX_RUST_OUTPUT}"
         COMMENT "Building Rust static library"
+        DEPENDS ${RUST_SOURCES}
         VERBATIM
     )
 endif()
 
 add_custom_target(automix_dsp_build DEPENDS "${AUTOMIX_RUST_OUTPUT}")
+
+# Clean target for Rust build artifacts
+add_custom_target(clean_rust
+    COMMAND cargo clean --manifest-path "${AUTOMIX_RUST_MANIFEST}"
+    COMMENT "Cleaning Rust build artifacts"
+)
 
 add_library(automix_dsp INTERFACE)
 target_link_libraries(automix_dsp INTERFACE "${AUTOMIX_RUST_OUTPUT}")
@@ -136,7 +152,6 @@ target_compile_definitions(AutoMix
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_REPORT_APP_USAGE=0
     PRIVATE
         AUTOMIX_VERSION="${CURRENT_VERSION}"

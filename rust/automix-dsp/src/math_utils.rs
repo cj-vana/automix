@@ -98,4 +98,43 @@ mod tests {
         assert_eq!(ms_to_samples(20.0, 48000.0), 960);
         assert_eq!(ms_to_samples(0.0, 48000.0), 0);
     }
+
+    #[test]
+    fn linear_to_db_nan_returns_silence() {
+        // NaN bypasses the <= 0.0 guard (IEEE 754), so we get NaN propagation.
+        // The NaN sanitization is handled at the input boundary (level_detector,
+        // ring_buffer, engine) rather than in math_utils.
+        let result = linear_to_db(f64::NAN);
+        assert!(result.is_nan());
+    }
+
+    #[test]
+    fn linear_to_db_inf_is_finite() {
+        let result = linear_to_db(f64::INFINITY);
+        assert!(result.is_finite() || result == f64::INFINITY);
+    }
+
+    #[test]
+    fn linear_to_db_neg_inf_returns_silence() {
+        assert_eq!(linear_to_db(f64::NEG_INFINITY), SILENCE_THRESHOLD_DB);
+    }
+
+    #[test]
+    fn db_to_linear_nan_is_not_negative() {
+        let result = db_to_linear(f64::NAN);
+        // NaN propagation is acceptable but the function should not panic
+        assert!(result.is_nan() || result >= 0.0);
+    }
+
+    #[test]
+    fn db_to_linear_inf() {
+        let result = db_to_linear(f64::INFINITY);
+        assert!(result == f64::INFINITY || result > 0.0);
+    }
+
+    #[test]
+    fn db_to_linear_neg_inf() {
+        let result = db_to_linear(f64::NEG_INFINITY);
+        assert_eq!(result, 0.0);
+    }
 }

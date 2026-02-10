@@ -19,14 +19,18 @@ impl LevelDetector {
     /// Process a single sample (f32 from the audio buffer).
     #[inline]
     pub fn process_sample(&mut self, sample: f32) {
-        let s = sample as f64;
+        let s = if sample.is_finite() {
+            sample as f64
+        } else {
+            0.0
+        };
         self.ring_buffer.push(s * s);
     }
 
     /// Process a block of samples. Returns the RMS at the end of the block.
     pub fn process_block(&mut self, samples: &[f32]) -> f64 {
         for &s in samples {
-            let sd = s as f64;
+            let sd = if s.is_finite() { s as f64 } else { 0.0 };
             self.ring_buffer.push(sd * sd);
         }
         self.current_rms = self.ring_buffer.rms();

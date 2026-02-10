@@ -1,5 +1,5 @@
 language = "C"
-pragma_once = true
+pragma_once = false
 include_guard = "AUTOMIX_DSP_H"
 documentation_style = "c99"
 style = "both"

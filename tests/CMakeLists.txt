@@ -13,6 +13,7 @@ add_executable(AutoMixFFITests
     ffi_parameter_test.cpp
     ffi_metering_test.cpp
     ffi_edge_cases_test.cpp
+    ffi_nan_test.cpp
 )
 
 target_include_directories(AutoMixFFITests
