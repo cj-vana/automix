@@ -85,13 +85,13 @@ jobs:
         run: ctest --test-dir build --output-on-failure -C ${{ env.BUILD_TYPE }}
 
       - name: Upload AU artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: AutoMix-AU-macOS
           path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/AU/
 
       - name: Upload Standalone artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: AutoMix-Standalone-macOS
           path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/Standalone/
