@@ -12,7 +12,7 @@ name = "automix_dsp"
 [dependencies]
 
 [build-dependencies]
-cbindgen = "0.27"
+cbindgen = "0.29"
 
 [dev-dependencies]
 approx = "0.5"
