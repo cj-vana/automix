@@ -1,92 +1,107 @@
 use crate::constants::{
-    DEFAULT_NOISE_FLOOR_FALL_MS, DEFAULT_NOISE_FLOOR_MARGIN_DB, DEFAULT_NOISE_FLOOR_RISE_MS,
-    NOISE_FLOOR_INIT_DB,
+    DEFAULT_NOISE_FLOOR_MARGIN_DB, NOISE_FLOOR_FALL_MS, NOISE_FLOOR_INIT_DB,
+    NOISE_FLOOR_RISE_ACTIVE_MS, NOISE_FLOOR_RISE_MS,
 };
-use crate::math_utils::{db_to_linear, linear_to_db};
-use crate::smoothing::OnePoleSmoother;
+use crate::math_utils::{db_to_linear, linear_to_db, time_constant_to_coeff};
 
 /// Adaptive noise floor tracker.
 ///
-/// Follows the minimum signal level using a min-follower approach:
-/// - Tracks downward quickly (rise coefficient) toward the noise floor.
-/// - Resists upward pull when the signal is clearly active (above floor + margin).
-/// - On re-enable (after reset), starts at a high floor and tracks down.
+/// Follows the room's resting level so activity detection adapts to the venue
+/// instead of gating at a fixed threshold. Three rates, chosen by where the
+/// input sits relative to the current floor:
+///
+/// - Below the floor: fall fast, so the tracker finds a quiet room quickly.
+/// - Above the floor but below the activity margin: rise at a moderate rate.
+/// - Above the activity margin (someone is talking): rise very slowly, so
+///   speech does not drag the floor up behind it.
+///
+/// The third rate is non-zero on purpose. An earlier version held the floor
+/// completely still whenever the input was above the margin, which meant a room
+/// whose ambient level rose past the margin — an HVAC system starting, a crowd
+/// filling in — left every channel reading "active" permanently with no way to
+/// recover.
+///
+/// Coefficients are per-sample but `update` is called once per block, so the
+/// per-sample coefficient is raised to the block length. Without that the wall
+/// clock time constants scale with the host's buffer size, which made the
+/// nominal 500 ms fall take anywhere from 30 seconds to 20 minutes depending on
+/// the host.
+///
+/// The state is kept in dB, not linear amplitude. Smoothing a linear level
+/// toward a target 60 dB away moves it most of the way in dB terms after a few
+/// percent of linear travel, so a "slow" linear tracker still lurches tens of
+/// dB in a couple of seconds. In the log domain the rate means what it says.
 pub struct NoiseFloorTracker {
-    floor_level: f64,
-    smoother: OnePoleSmoother,
-    margin_linear: f64,
+    floor_db: f64,
+    fall_coeff: f64,
+    rise_coeff: f64,
+    rise_active_coeff: f64,
+    margin_db: f64,
+}
+
+/// Compound a per-sample one-pole coefficient over `n` samples.
+///
+/// Applying `y += a(x - y)` n times is exactly `y += (1 - (1-a)^n)(x - y)`, so
+/// this stays a closed form rather than a loop.
+#[inline]
+fn block_coeff(per_sample: f64, n: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let remaining = (1.0 - per_sample).max(0.0);
+    1.0 - remaining.powi(n.min(i32::MAX as usize) as i32)
 }
 
 impl NoiseFloorTracker {
     pub fn new(sample_rate: f64) -> Self {
-        let init_linear = db_to_linear(NOISE_FLOOR_INIT_DB);
-        // For the noise floor, "falling" (tracking downward) should be fast,
-        // "rising" (tracking upward) should be slow. The OnePoleSmoother uses
-        // attack for input > current, release for input < current.
-        // So: attack = slow rise (FALL_MS), release = fast fall (RISE_MS).
-        let mut smoother = OnePoleSmoother::from_ms(
-            DEFAULT_NOISE_FLOOR_FALL_MS,
-            DEFAULT_NOISE_FLOOR_RISE_MS,
-            sample_rate,
-        );
-        smoother.set_immediate(init_linear);
-
         Self {
-            floor_level: init_linear,
-            smoother,
-            margin_linear: db_to_linear(DEFAULT_NOISE_FLOOR_MARGIN_DB),
+            floor_db: NOISE_FLOOR_INIT_DB,
+            fall_coeff: time_constant_to_coeff(NOISE_FLOOR_FALL_MS, sample_rate),
+            rise_coeff: time_constant_to_coeff(NOISE_FLOOR_RISE_MS, sample_rate),
+            rise_active_coeff: time_constant_to_coeff(NOISE_FLOOR_RISE_ACTIVE_MS, sample_rate),
+            margin_db: DEFAULT_NOISE_FLOOR_MARGIN_DB,
         }
     }
 
-    /// Update the noise floor estimate given the current RMS level (linear).
+    /// Update the floor estimate from this block's RMS level.
     ///
-    /// The tracker only follows the signal downward. When the input is
-    /// significantly above the current floor (active speech), the floor
-    /// is not pulled upward.
-    pub fn update(&mut self, rms_linear: f64) {
-        // Only track toward the input if it's below or near the current floor.
-        // If the signal is well above the floor (active speech), don't follow it up.
-        if rms_linear < self.floor_level * self.margin_linear {
-            self.floor_level = self.smoother.process(rms_linear);
-        } else {
-            // Still run the smoother but toward the current floor (maintain state)
-            self.floor_level = self.smoother.process(self.floor_level);
+    /// `num_samples` is the block length the RMS was measured over; it keeps
+    /// the time constants tied to wall-clock time rather than buffer size.
+    pub fn update(&mut self, rms_linear: f64, num_samples: usize) {
+        if !rms_linear.is_finite() {
+            return;
         }
+
+        let rms_db = linear_to_db(rms_linear);
+
+        let per_sample = if rms_db < self.floor_db {
+            self.fall_coeff
+        } else if rms_db > self.floor_db + self.margin_db {
+            self.rise_active_coeff
+        } else {
+            self.rise_coeff
+        };
+
+        let coeff = block_coeff(per_sample, num_samples);
+        self.floor_db += coeff * (rms_db - self.floor_db);
     }
 
-    /// Check if the given RMS level is above the noise floor + margin (i.e., active).
+    /// Whether the given RMS level is above the floor plus its margin.
     #[inline]
     pub fn is_active(&self, rms_linear: f64) -> bool {
-        rms_linear > self.floor_level * self.margin_linear
+        linear_to_db(rms_linear) > self.floor_db + self.margin_db
     }
 
     /// Current noise floor level in linear units.
     #[inline]
     pub fn floor_linear(&self) -> f64 {
-        self.floor_level
+        db_to_linear(self.floor_db)
     }
 
     /// Current noise floor level in dB.
     #[inline]
     pub fn floor_db(&self) -> f64 {
-        linear_to_db(self.floor_level)
-    }
-
-    /// Reset the noise floor to initial state (gradual reset).
-    pub fn reset(&mut self, sample_rate: f64) {
-        let init_linear = db_to_linear(NOISE_FLOOR_INIT_DB);
-        self.floor_level = init_linear;
-        self.smoother = OnePoleSmoother::from_ms(
-            DEFAULT_NOISE_FLOOR_FALL_MS,
-            DEFAULT_NOISE_FLOOR_RISE_MS,
-            sample_rate,
-        );
-        self.smoother.set_immediate(init_linear);
-    }
-
-    /// Set the margin in dB.
-    pub fn set_margin_db(&mut self, margin_db: f64) {
-        self.margin_linear = db_to_linear(margin_db);
+        self.floor_db
     }
 }
 
@@ -95,69 +110,119 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
 
+    const SR: f64 = 48000.0;
+    const BLOCK: usize = 256;
+
+    /// Drive the tracker for `seconds` of wall-clock audio at a fixed level,
+    /// at block rate — which is how the engine actually calls it.
+    fn run_for(nf: &mut NoiseFloorTracker, level: f64, seconds: f64, block: usize) {
+        let blocks = (seconds * SR / block as f64).round() as usize;
+        for _ in 0..blocks {
+            nf.update(level, block);
+        }
+    }
+
     #[test]
     fn tracks_downward() {
-        let mut nf = NoiseFloorTracker::new(48000.0);
+        let mut nf = NoiseFloorTracker::new(SR);
         let quiet = db_to_linear(-80.0);
-        // Feed quiet signal many times
-        for _ in 0..48000 {
-            nf.update(quiet);
+        run_for(&mut nf, quiet, 5.0, BLOCK);
+        assert!(
+            nf.floor_db() < -70.0,
+            "floor should have fallen toward -80 dB, got {}",
+            nf.floor_db()
+        );
+    }
+
+    /// The bug this guards: the coefficients are per-sample but update() runs
+    /// once per block, so without compounding the convergence rate scaled with
+    /// the host's buffer size. Same wall-clock time must give the same floor.
+    #[test]
+    fn convergence_is_independent_of_block_size() {
+        let quiet = db_to_linear(-80.0);
+        let mut floors = Vec::new();
+
+        for block in [64_usize, 256, 1024, 2048] {
+            let mut nf = NoiseFloorTracker::new(SR);
+            run_for(&mut nf, quiet, 5.0, block);
+            floors.push(nf.floor_db());
         }
-        // Floor should have tracked down toward -80dB
-        assert!(nf.floor_db() < -70.0);
+
+        let min = floors.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = floors.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            max - min < 1.0,
+            "floor after 5s varied with block size: {floors:?}"
+        );
     }
 
     #[test]
     fn resists_upward_from_speech() {
-        let mut nf = NoiseFloorTracker::new(48000.0);
-        let quiet = db_to_linear(-80.0);
-        // First, let it track to a low floor
-        for _ in 0..48000 {
-            nf.update(quiet);
-        }
-        let floor_before = nf.floor_db();
+        let mut nf = NoiseFloorTracker::new(SR);
+        run_for(&mut nf, db_to_linear(-80.0), 5.0, BLOCK);
+        let before = nf.floor_db();
 
-        // Now feed a loud signal (speech)
-        let loud = db_to_linear(-20.0);
-        for _ in 0..4800 {
-            nf.update(loud);
-        }
-        let floor_after = nf.floor_db();
+        run_for(&mut nf, db_to_linear(-20.0), 2.0, BLOCK);
+        let after = nf.floor_db();
 
-        // Floor should not have risen significantly
         assert!(
-            (floor_after - floor_before).abs() < 3.0,
-            "Floor moved too much: before={floor_before}, after={floor_after}"
+            (after - before).abs() < 3.0,
+            "speech pulled the floor: before={before}, after={after}"
+        );
+    }
+
+    /// The lockout regression: if the room gets genuinely louder, the floor has
+    /// to follow eventually or every channel reads active forever.
+    #[test]
+    fn recovers_when_ambient_level_rises() {
+        let mut nf = NoiseFloorTracker::new(SR);
+        run_for(&mut nf, db_to_linear(-80.0), 5.0, BLOCK);
+        assert!(nf.floor_db() < -70.0);
+
+        // Room noise jumps well above the old floor plus margin and stays there.
+        let louder = db_to_linear(-45.0);
+        assert!(
+            nf.is_active(louder),
+            "precondition: reads as active at first"
+        );
+
+        run_for(&mut nf, louder, 240.0, BLOCK);
+
+        assert!(
+            !nf.is_active(louder),
+            "floor latched at {} dB and never learned the new ambient level",
+            nf.floor_db()
         );
     }
 
     #[test]
     fn active_detection_with_margin() {
-        let mut nf = NoiseFloorTracker::new(48000.0);
+        let mut nf = NoiseFloorTracker::new(SR);
         let quiet = db_to_linear(-80.0);
-        for _ in 0..48000 {
-            nf.update(quiet);
-        }
+        run_for(&mut nf, quiet, 5.0, BLOCK);
 
-        // Signal well above floor + margin should be active
-        let loud = db_to_linear(-40.0);
-        assert!(nf.is_active(loud));
-
-        // Signal at floor level should not be active
+        assert!(nf.is_active(db_to_linear(-40.0)));
         assert!(!nf.is_active(quiet));
     }
 
     #[test]
-    fn gradual_reset() {
-        let mut nf = NoiseFloorTracker::new(48000.0);
-        let quiet = db_to_linear(-80.0);
-        for _ in 0..48000 {
-            nf.update(quiet);
-        }
-        assert!(nf.floor_db() < -70.0);
+    fn non_finite_input_is_ignored() {
+        let mut nf = NoiseFloorTracker::new(SR);
+        run_for(&mut nf, db_to_linear(-80.0), 5.0, BLOCK);
+        let before = nf.floor_db();
 
-        // Reset — floor should jump back to init level
-        nf.reset(48000.0);
-        assert_relative_eq!(nf.floor_db(), NOISE_FLOOR_INIT_DB, epsilon = 1.0);
+        nf.update(f64::NAN, BLOCK);
+        nf.update(f64::INFINITY, BLOCK);
+
+        assert_relative_eq!(nf.floor_db(), before, epsilon = 1e-12);
+        assert!(nf.floor_linear().is_finite());
+    }
+
+    #[test]
+    fn zero_length_block_is_a_no_op() {
+        let mut nf = NoiseFloorTracker::new(SR);
+        let before = nf.floor_db();
+        nf.update(db_to_linear(-10.0), 0);
+        assert_relative_eq!(nf.floor_db(), before, epsilon = 1e-12);
     }
 }

@@ -6,7 +6,10 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 endif()
 
-# Read version from file
+# Read version from file. The CMAKE_CONFIGURE_DEPENDS entry makes a version
+# bump re-run CMake; without it the old version stays baked into the build.
+set_property(DIRECTORY APPEND PROPERTY
+    CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/VERSION")
 file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION" CURRENT_VERSION)
 string(STRIP "${CURRENT_VERSION}" CURRENT_VERSION)
 
@@ -49,11 +52,14 @@ foreach(_arch IN LISTS CMAKE_OSX_ARCHITECTURES)
     )
 endforeach()
 
-# Collect Rust sources for dependency tracking
-file(GLOB_RECURSE RUST_SOURCES
+# Collect Rust sources for dependency tracking. CONFIGURE_DEPENDS re-runs the
+# glob on each build, so adding a new .rs file does not silently skip the
+# rebuild until someone reconfigures by hand.
+file(GLOB_RECURSE RUST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/src/*.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/Cargo.toml"
     "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/Cargo.lock"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/build.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/cbindgen.toml"
 )
 
@@ -125,6 +131,9 @@ target_sources(AutoMix
         source/PluginEditor.cpp
         source/PluginEditor.h
         source/Parameters.h
+        source/gui/AutomixTheme.h
+        source/gui/ChannelStrip.cpp
+        source/gui/ChannelStrip.h
 )
 
 target_include_directories(AutoMix
@@ -166,7 +175,11 @@ if(APPLE)
 endif()
 
 # ---- Tests ----
+# include(CTest) defines BUILD_TESTING (default ON) and calls enable_testing().
+# Testing the variable before anything defines it meant a plain `cmake -B build`
+# produced no test targets and `ctest` reported "No tests were found".
+include(CTest)
+
 if(BUILD_TESTING)
-    enable_testing()
     add_subdirectory(tests)
 endif()

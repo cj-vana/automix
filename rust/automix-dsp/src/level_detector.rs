@@ -54,13 +54,6 @@ impl LevelDetector {
         self.ring_buffer.reset();
         self.current_rms = 0.0;
     }
-
-    /// Reconfigure the window size. Resets state.
-    pub fn set_window(&mut self, window_ms: f64, sample_rate: f64) {
-        let window_samples = ms_to_samples(window_ms, sample_rate).max(1);
-        self.ring_buffer.set_window_len(window_samples);
-        self.current_rms = 0.0;
-    }
 }
 
 #[cfg(test)]

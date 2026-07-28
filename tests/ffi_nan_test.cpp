@@ -1,15 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "test_helpers.h"
 
-static void converge (TestEngine& engine, uint32_t numChannels, uint32_t numSamples, float value, int blocks)
-{
-    for (int i = 0; i < blocks; ++i)
-    {
-        TestBuffer buf (numChannels, numSamples, value);
-        automix_process (engine.get(), buf.data(), buf.numChannels(), buf.numSamples());
-    }
-}
-
 TEST_CASE ("NaN input produces finite output", "[nan]")
 {
     TestEngine engine (2, 48000.0f);

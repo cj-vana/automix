@@ -83,13 +83,6 @@ impl LastMicHold {
         self.hold_duration = ms_to_samples(ms, sample_rate) as u64;
     }
 
-    /// Reset the hold state.
-    pub fn reset(&mut self) {
-        self.last_active_channel = None;
-        self.hold_counter = 0;
-        self.is_holding = false;
-    }
-
     #[inline]
     pub fn is_holding(&self) -> bool {
         self.is_holding

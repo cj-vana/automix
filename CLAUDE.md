@@ -3,8 +3,11 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-Dugan-style automixer: AU plugin + standalone macOS app.
+Gain-sharing automatic microphone mixer: AU plugin + standalone macOS app.
 Hybrid architecture: JUCE 8 (C++) for plugin/GUI + Rust for DSP via C FFI.
+
+Describe the algorithm generically ("gain-sharing automixer"). Do not name or compare it to
+commercial automixer products in code, comments, or documentation.
 
 ## Build Commands
 
@@ -22,7 +25,7 @@ cargo test --manifest-path rust/automix-dsp/Cargo.toml
 ctest --test-dir build --output-on-failure
 
 # UB detection
-cargo miri test --manifest-path rust/automix-dsp/Cargo.toml
+cargo +nightly miri test --manifest-path rust/automix-dsp/Cargo.toml
 ```
 
 Build artifacts:
@@ -54,34 +57,49 @@ Rust `pub const` values become `#define` macros in the generated header. **Alway
 - Input/output bus layout must match (`isBusesLayoutSupported` enforces symmetry)
 - Version read from root `VERSION` file by CMake
 
-### DSP Algorithm (Dugan Gain-Sharing)
+### DSP Algorithm (Gain-Sharing)
 9-phase per-block pipeline:
 1. RMS level detection (sliding window)
 2. Adaptive noise floor tracking
 3. Active channel detection
 4. Last-mic-hold evaluation
 5. Gain-sharing: `gain[i] = (rms[i] * weight[i]) / sum(all)`
-6. NOM attenuation: `-10*log10(NOM)` dB
+6. NOM attenuation: `-10*log10(NOM)` dB, **off by default** — step 5 already normalises the
+   gains to sum to 1.0, so applying this too attenuates the mix a second time
 7. One-pole gain smoothing (attack/release)
-8. Per-sample gain ramp application
+8. Per-sample gain ramp application, blended toward unity by the bypass crossfade
 9. Counter update
+
+Two rate invariants are easy to break here. The noise-floor tracker holds *per-sample*
+coefficients but `update` is called once per block, so the block length must be compounded in
+(`1 - (1-a)^n`) or its time constants scale with the host's buffer size. And its state is kept
+in dB, not linear, because a few percent of linear travel is tens of dB when the gap is wide.
 
 ### Key Files
 - `source/PluginProcessor.cpp` — JUCE processor: creates/destroys Rust engine in `prepareToPlay`/`releaseResources`, calls `automix_process` in `processBlock`
-- `source/PluginEditor.cpp` — GUI (currently Phase 0 placeholder)
-- `rust/automix-dsp/src/lib.rs` — `AutomixEngine` struct and core algorithm
+- `source/PluginEditor.cpp` — header, dB scale, and the channel-strip bay
+- `source/gui/ChannelStrip.cpp` — one channel strip; `StripLayout::compute` is shared with the
+  dB scale so ticks land on the meter rows they label
+- `source/gui/AutomixTheme.h` — colours, fonts, meter scaling, segment drawing
+- `rust/automix-dsp/src/engine.rs` — `AutomixEngine` struct and the 9-phase per-block pipeline
+- `rust/automix-dsp/src/lib.rs` — module index only
 - `rust/automix-dsp/src/ffi.rs` — `#[no_mangle] extern "C"` wrapper functions
 - `rust/automix-dsp/build.rs` — cbindgen header generation
 - `cmake/CompilerWarnings.cmake` — shared warning flags (`set_automix_warnings(target)`)
 
 ## CI
-GitHub Actions (`.github/workflows/build_and_test.yml`): runs on `main` and `dev` branches. Rust tests first, then full CMake build + Catch2 tests. Tag `v*` triggers release with AU/Standalone zips.
+GitHub Actions (`.github/workflows/build_and_test.yml`): runs on `main` and `dev` branches. Rust tests first, then full CMake build + Catch2 tests. Tag `v*` triggers the release job (the workflow filters on both branches and `v*` tags).
 
 ## Testing
 - **Rust**: `cargo test` for unit tests, `proptest` for invariants (gain sum ≈ 1.0)
-- **C++**: Catch2 for plugin instantiation, parameter layout, bus validation
-- **Plugin validation**: pluginval at strictness 10
-- **Memory safety**: `cargo miri test`
+- **C++**: Catch2 exercising the C FFI directly (lifecycle, process, parameters, metering, NaN/Inf,
+  edge cases). These link the Rust staticlib; they do not instantiate the JUCE processor.
+- **Memory safety**: `cargo +nightly miri test` (miri is nightly-only; `rust-toolchain.toml`
+  pins stable, so the toolchain has to be named explicitly)
+
+The root `CMakeLists.txt` calls `include(CTest)` before testing `BUILD_TESTING`, so tests build
+by default. Testing the variable first, as an earlier version did, meant a plain `cmake -B build`
+produced no test targets and `ctest` exited 0 having run nothing.
 
 ## macOS Build
 - Universal binary (arm64 + x86_64) built by driving `cargo build` for each Rust target and combining with `lipo`

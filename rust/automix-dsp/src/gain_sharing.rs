@@ -1,6 +1,6 @@
 use crate::constants::{AUTOMIX_MAX_CHANNELS, EPSILON};
 
-/// Result of a Dugan gain-sharing computation.
+/// Result of a gain-sharing computation.
 #[derive(Debug, Clone)]
 pub struct GainSharingResult {
     /// Per-channel gains in [0, 1].
@@ -9,7 +9,7 @@ pub struct GainSharingResult {
     pub nom: f64,
 }
 
-/// Compute Dugan gain-sharing gains from current RMS levels.
+/// Compute gain-sharing gains from current RMS levels.
 ///
 /// This is a pure, stateless function. Given channel RMS levels, weights,
 /// activity flags, and participation flags, it produces per-channel gains
@@ -22,7 +22,7 @@ pub struct GainSharingResult {
 ///   (i.e., not muted, not bypassed, and passes solo logic).
 /// - `num_channels`: Number of channels in use.
 /// - `last_mic_channel`: Channel to hold at unity when all channels are silent.
-pub fn compute_dugan_gains(
+pub fn compute_shared_gains(
     rms_levels: &[f64; AUTOMIX_MAX_CHANNELS],
     weights: &[f64; AUTOMIX_MAX_CHANNELS],
     is_active: &[bool; AUTOMIX_MAX_CHANNELS],
@@ -45,7 +45,7 @@ pub fn compute_dugan_gains(
     }
 
     if weighted_sum > EPSILON {
-        // Normal Dugan: distribute gain proportional to weighted RMS
+        // Normal path: distribute gain proportional to weighted RMS
         for i in 0..num_channels {
             if participating[i] && is_active[i] {
                 gains[i] = weighted[i] / weighted_sum;
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn single_active_channel() {
         let (rms, w, a, p) = make_arrays(&[0.5], &[1.0], &[true], &[true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 1, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 1, None);
         assert_relative_eq!(result.gains[0], 1.0, epsilon = 1e-10);
         assert_relative_eq!(result.nom, 1.0, epsilon = 1e-10);
     }
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn two_equal_channels() {
         let (rms, w, a, p) = make_arrays(&[0.5, 0.5], &[1.0, 1.0], &[true, true], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         assert_relative_eq!(result.gains[0], 0.5, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.5, epsilon = 1e-10);
         assert_relative_eq!(result.nom, 2.0, epsilon = 1e-10);
@@ -121,7 +121,7 @@ mod tests {
     fn proportional_distribution() {
         // Channel 0 is 3x louder than channel 1
         let (rms, w, a, p) = make_arrays(&[0.75, 0.25], &[1.0, 1.0], &[true, true], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         assert_relative_eq!(result.gains[0], 0.75, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.25, epsilon = 1e-10);
     }
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn inactive_channel_gets_zero() {
         let (rms, w, a, p) = make_arrays(&[0.5, 0.5], &[1.0, 1.0], &[true, false], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         assert_relative_eq!(result.gains[0], 1.0, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.0, epsilon = 1e-10);
         assert_relative_eq!(result.nom, 1.0, epsilon = 1e-10);
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn non_participating_excluded() {
         let (rms, w, a, p) = make_arrays(&[0.5, 0.5], &[1.0, 1.0], &[true, true], &[true, false]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         assert_relative_eq!(result.gains[0], 1.0, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.0, epsilon = 1e-10);
     }
@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn silence_with_last_mic_hold() {
         let (rms, w, a, p) = make_arrays(&[0.0, 0.0], &[1.0, 1.0], &[false, false], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, Some(1));
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, Some(1));
         assert_relative_eq!(result.gains[0], 0.0, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 1.0, epsilon = 1e-10);
     }
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn silence_no_last_mic() {
         let (rms, w, a, p) = make_arrays(&[0.0, 0.0], &[1.0, 1.0], &[false, false], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         assert_relative_eq!(result.gains[0], 0.0, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.0, epsilon = 1e-10);
     }
@@ -163,7 +163,7 @@ mod tests {
     fn weights_affect_distribution() {
         // Equal RMS but channel 0 has double weight
         let (rms, w, a, p) = make_arrays(&[0.5, 0.5], &[1.0, 0.5], &[true, true], &[true, true]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, None);
         // weighted: 0.5*1.0=0.5, 0.5*0.5=0.25, sum=0.75
         assert_relative_eq!(result.gains[0], 0.5 / 0.75, epsilon = 1e-10);
         assert_relative_eq!(result.gains[1], 0.25 / 0.75, epsilon = 1e-10);
@@ -177,7 +177,7 @@ mod tests {
             &[true, true, true, true],
             &[true, true, true, true],
         );
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 4, None);
+        let result = compute_shared_gains(&rms, &w, &a, &p, 4, None);
         let sum: f64 = result.gains.iter().sum();
         assert_relative_eq!(sum, 1.0, epsilon = 1e-10);
     }
@@ -186,7 +186,7 @@ mod tests {
     fn last_mic_hold_non_participating_ignored() {
         // Last mic channel is non-participating — should not get gain
         let (rms, w, a, p) = make_arrays(&[0.0, 0.0], &[1.0, 1.0], &[false, false], &[true, false]);
-        let result = compute_dugan_gains(&rms, &w, &a, &p, 2, Some(1));
+        let result = compute_shared_gains(&rms, &w, &a, &p, 2, Some(1));
         assert_relative_eq!(result.gains[1], 0.0, epsilon = 1e-10);
     }
 }
@@ -226,7 +226,7 @@ mod proptests {
                 active[i] = true;
                 participating[i] = true;
             }
-            let result = compute_dugan_gains(&rms, &weights, &active, &participating, n, None);
+            let result = compute_shared_gains(&rms, &weights, &active, &participating, n, None);
             let sum: f64 = result.gains[..n].iter().sum();
             prop_assert!((sum - 1.0).abs() < 1e-8,
                 "Gain sum should be ~1.0, got {sum}");
@@ -247,7 +247,7 @@ mod proptests {
                 active[i] = true;
                 participating[i] = true;
             }
-            let result = compute_dugan_gains(&rms, &weights, &active, &participating, n, None);
+            let result = compute_shared_gains(&rms, &weights, &active, &participating, n, None);
             for i in 0..AUTOMIX_MAX_CHANNELS {
                 prop_assert!(result.gains[i] >= 0.0 && result.gains[i] <= 1.0,
                     "Gain[{i}] = {} out of bounds", result.gains[i]);
@@ -270,7 +270,7 @@ mod proptests {
             active[1] = true;
             participating[0] = true;
             participating[1] = true;
-            let result = compute_dugan_gains(&rms, &weights, &active, &participating, 2, None);
+            let result = compute_shared_gains(&rms, &weights, &active, &participating, 2, None);
             prop_assert!(result.gains[0] > result.gains[1],
                 "Louder channel gain {} should exceed quieter {}",
                 result.gains[0], result.gains[1]);
@@ -291,8 +291,8 @@ mod proptests {
                 active[i] = true;
                 participating[i] = true;
             }
-            let r1 = compute_dugan_gains(&rms, &weights, &active, &participating, n, None);
-            let r2 = compute_dugan_gains(&rms, &weights, &active, &participating, n, None);
+            let r1 = compute_shared_gains(&rms, &weights, &active, &participating, n, None);
+            let r2 = compute_shared_gains(&rms, &weights, &active, &participating, n, None);
             for i in 0..AUTOMIX_MAX_CHANNELS {
                 prop_assert!((r1.gains[i] - r2.gains[i]).abs() < 1e-15,
                     "Non-deterministic at channel {i}");

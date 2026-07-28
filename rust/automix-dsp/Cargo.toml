@@ -2,7 +2,7 @@
 name = "automix-dsp"
 version = "0.2.0"
 edition = "2021"
-description = "Dugan-style automixer DSP core"
+description = "Gain-sharing automatic microphone mixer DSP core"
 license = "MIT"
 
 [lib]

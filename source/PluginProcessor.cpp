@@ -85,6 +85,15 @@ void AutomixProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         static_cast<uint32_t> (buffer.getNumSamples()));
 
     cacheMetering();
+
+    // Lets the editor tell "silent" apart from "the host stopped calling us".
+    // Without it the meters freeze at their last value when transport stops.
+    blockCounter_.fetch_add (1, std::memory_order_relaxed);
+}
+
+juce::AudioProcessorParameter* AutomixProcessor::getBypassParameter() const
+{
+    return apvts.getParameter (AutomixParams::globalBypassID);
 }
 
 static bool floatChanged (float a, float b)
@@ -191,6 +200,18 @@ void AutomixProcessor::cacheMetering()
         meterIsActive_[i].store (meters[i].is_active, std::memory_order_relaxed);
     }
 
+    // Clear the slots above the current channel count. After the host
+    // renegotiates to a narrower layout these keep whatever the wider
+    // configuration last wrote, and the editor draws them as live channels.
+    for (auto i = numWritten; i < static_cast<uint32_t> (kMaxChannels); ++i)
+    {
+        meterInputRmsDb_[i].store (-120.0f, std::memory_order_relaxed);
+        meterGainDb_[i].store (-120.0f, std::memory_order_relaxed);
+        meterOutputRmsDb_[i].store (-120.0f, std::memory_order_relaxed);
+        meterNoiseFloorDb_[i].store (-120.0f, std::memory_order_relaxed);
+        meterIsActive_[i].store (false, std::memory_order_relaxed);
+    }
+
     AutomixGlobalMetering gm {};
     if (automix_get_global_metering (engine_, &gm))
     {
@@ -256,8 +277,8 @@ juce::AudioProcessorEditor* AutomixProcessor::createEditor()
 void AutomixProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
-    auto xml = state.createXml();
-    copyXmlToBinary (*xml, destData);
+    if (auto xml = state.createXml())
+        copyXmlToBinary (*xml, destData);
 }
 
 void AutomixProcessor::setStateInformation (const void* data, int sizeInBytes)

@@ -22,6 +22,11 @@ public:
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
+    // Hands the host's bypass button to our own global-bypass parameter, so the
+    // host crossfades through the engine's ramp instead of hard-switching the
+    // plugin in and out of the signal path.
+    juce::AudioProcessorParameter* getBypassParameter() const override;
+
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
@@ -62,6 +67,10 @@ public:
     GlobalMeterData  getGlobalMeterData() const;
     int              getActiveChannelCount() const;
 
+    // Increments once per processed block. The editor watches it to detect that
+    // audio has stopped, which is not the same thing as audio being silent.
+    uint32_t getBlockCounter() const { return blockCounter_.load (std::memory_order_relaxed); }
+
     // ---- APVTS (public for Editor attachment) ----
     juce::AudioProcessorValueTreeState apvts;
 
@@ -91,6 +100,8 @@ private:
     std::atomic<float> meterNomCount_    { 0.0f };
     std::atomic<float> meterNomAttenDb_  { 0.0f };
 
+    std::atomic<uint32_t> blockCounter_ { 0 };
+
     void syncParametersToEngine();
     void cacheMetering();
     void invalidateParameterCache();
@@ -100,7 +111,7 @@ private:
     float cachedReleaseMs_    = -1.0f;
     float cachedHoldMs_       = -1.0f;
     bool  cachedGlobalBypass_ = false;
-    bool  cachedNomAtten_     = true;
+    bool  cachedNomAtten_     = false;
     bool  cacheInitialized_   = false;
 
     float cachedChannelWeight_[kMaxChannels]  {};

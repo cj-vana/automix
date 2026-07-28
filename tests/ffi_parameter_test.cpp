@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "test_helpers.h"
+#include <cmath>
 
 TEST_CASE ("Set channel weight", "[parameters]")
 {
@@ -83,15 +84,6 @@ TEST_CASE ("Parameter setters with null engine are safe", "[parameters]")
 
 // ---- Behavioral parameter tests ----
 
-static void converge (TestEngine& engine, TestBuffer& buf, int blocks)
-{
-    for (int i = 0; i < blocks; ++i)
-    {
-        // Re-fill with original values each iteration
-        automix_process (engine.get(), buf.data(), buf.numChannels(), buf.numSamples());
-    }
-}
-
 TEST_CASE ("Mute silences channel output", "[parameters][behavioral]")
 {
     TestEngine engine (2, 48000.0f);
@@ -116,6 +108,14 @@ TEST_CASE ("Global bypass passes audio through", "[parameters][behavioral]")
     TestEngine engine (2, 48000.0f);
     automix_set_global_bypass (engine.get(), true);
 
+    // Let the 15 ms bypass crossfade finish before asserting passthrough.
+    for (int i = 0; i < 8; ++i)
+    {
+        TestBuffer warmup (2, 256, 0.5f);
+        warmup.fill (1, 0.3f);
+        automix_process (engine.get(), warmup.data(), warmup.numChannels(), warmup.numSamples());
+    }
+
     TestBuffer buf (2, 256, 0.5f);
     buf.fill (1, 0.3f);
     automix_process (engine.get(), buf.data(), buf.numChannels(), buf.numSamples());
@@ -125,6 +125,29 @@ TEST_CASE ("Global bypass passes audio through", "[parameters][behavioral]")
         REQUIRE (s == 0.5f);
     for (auto s : buf.channels[1])
         REQUIRE (s == 0.3f);
+}
+
+TEST_CASE ("Metering keeps updating while bypassed", "[parameters][behavioral]")
+{
+    TestEngine engine (2, 48000.0f);
+    automix_set_global_bypass (engine.get(), true);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        TestBuffer buf (2, 256, 0.5f);
+        buf.fill (1, 0.1f);
+        automix_process (engine.get(), buf.data(), buf.numChannels(), buf.numSamples());
+    }
+
+    // Level detection must keep running under bypass, or the meters freeze the
+    // moment an operator hits the bypass button.
+    AutomixChannelMetering m {};
+    REQUIRE (automix_get_channel_metering (engine.get(), 0, &m));
+    REQUIRE (m.input_rms_db > -10.0f);
+    REQUIRE (m.input_rms_db < 0.0f);
+
+    // And the reported gain is what is heard: unity.
+    REQUIRE (std::abs (m.gain_db) < 0.01f);
 }
 
 TEST_CASE ("Channel bypass preserves unity gain", "[parameters][behavioral]")

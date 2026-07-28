@@ -1,6 +1,19 @@
 /// Maximum ring buffer capacity: 100ms at 192kHz.
 const RING_BUFFER_MAX_CAPACITY: usize = 19200;
 
+/// Ceiling on a stored squared sample.
+///
+/// A running sum only stays correct if the values in it are the same order of
+/// magnitude. Push one enormous-but-finite sample and every subsequent small
+/// value is swallowed by rounding; when the big one rotates out, the sum is
+/// left with a permanent error, because `sum -= old; sum += new` preserves any
+/// error it already has forever. A single loud thump could park a channel's
+/// measured level wrong for the rest of the show.
+///
+/// 100.0 is +40 dBFS squared — far above anything a sane signal chain produces,
+/// but low enough that 19200 of them sum without losing precision.
+const MAX_SQUARED_SAMPLE: f64 = 100.0;
+
 /// Fixed-capacity ring buffer that stores squared sample values and maintains
 /// a running sum for O(1) RMS computation.
 pub struct RingBuffer {
@@ -26,9 +39,10 @@ impl RingBuffer {
     /// Push a squared sample value into the buffer.
     #[inline]
     pub fn push(&mut self, squared_sample: f64) {
-        // Defense-in-depth: reject non-finite values to protect running_sum
+        // Reject non-finite values and clamp the magnitude, so the running sum
+        // never mixes wildly different scales. See MAX_SQUARED_SAMPLE.
         let squared_sample = if squared_sample.is_finite() {
-            squared_sample
+            squared_sample.clamp(0.0, MAX_SQUARED_SAMPLE)
         } else {
             0.0
         };
@@ -47,6 +61,10 @@ impl RingBuffer {
         self.write_pos += 1;
         if self.write_pos >= self.window_len {
             self.write_pos = 0;
+            // Rebuild the sum exactly once per wrap. Any residual error in the
+            // incremental sum is otherwise invariant under push() and would
+            // never wash out. Amortised this is one extra add per sample.
+            self.running_sum = self.buffer[..self.window_len].iter().sum();
         }
         self.samples_written += 1;
     }
@@ -183,14 +201,63 @@ mod tests {
         assert_eq!(rb.window_len(), RING_BUFFER_MAX_CAPACITY);
     }
 
+    /// The old version asserted `mean() >= 0.0`, which push() clamps into
+    /// existence — it could not fail. Compare against the exact sum instead.
     #[test]
-    fn numerical_stability_long_run() {
+    fn running_sum_matches_exact_sum_after_long_run() {
         let mut rb = RingBuffer::new(100);
-        // Push many samples, then check sum doesn't drift negative
+        let mut recent = Vec::new();
+
         for i in 0..10_000 {
             let val = ((i % 10) as f64) * 0.01;
             rb.push(val);
+            recent.push(val);
+            if recent.len() > 100 {
+                recent.remove(0);
+            }
         }
+
+        let exact: f64 = recent.iter().sum::<f64>() / 100.0;
+        assert_relative_eq!(rb.mean(), exact, epsilon = 1e-12);
+    }
+
+    /// A single enormous sample used to leave a permanent error in the running
+    /// sum, parking the channel's measured level wrong for good.
+    #[test]
+    fn recovers_from_a_huge_transient() {
+        let mut rb = RingBuffer::new(64);
+
+        for _ in 0..64 {
+            rb.push(0.25);
+        }
+        assert_relative_eq!(rb.rms(), 0.5, epsilon = 1e-12);
+
+        rb.push(1.0e30);
+
+        // Flush the transient out of the window with a known level.
+        for _ in 0..128 {
+            rb.push(0.25);
+        }
+
+        assert_relative_eq!(rb.rms(), 0.5, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn huge_sample_is_clamped_not_stored_verbatim() {
+        let mut rb = RingBuffer::new(8);
+        rb.push(f64::MAX);
+        assert!(rb.mean().is_finite());
+        assert!(rb.mean() <= MAX_SQUARED_SAMPLE);
+    }
+
+    #[test]
+    fn negative_squared_input_does_not_corrupt_the_sum() {
+        let mut rb = RingBuffer::new(8);
+        rb.push(-5.0);
         assert!(rb.mean() >= 0.0);
+        for _ in 0..16 {
+            rb.push(0.25);
+        }
+        assert_relative_eq!(rb.rms(), 0.5, epsilon = 1e-12);
     }
 }

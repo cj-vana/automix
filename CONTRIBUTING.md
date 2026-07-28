@@ -38,7 +38,7 @@ cargo test --manifest-path rust/automix-dsp/Cargo.toml
 ctest --test-dir build --output-on-failure
 
 # Memory safety checks
-cargo miri test --manifest-path rust/automix-dsp/Cargo.toml
+cargo +nightly miri test --manifest-path rust/automix-dsp/Cargo.toml
 ```
 
 ## Branch Model

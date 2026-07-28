@@ -1,11 +1,13 @@
 use crate::channel::Channel;
 use crate::constants::{
-    AUTOMIX_MAX_CHANNELS, DEFAULT_ATTACK_MS, DEFAULT_RELEASE_MS, MAX_ATTACK_MS, MAX_HOLD_TIME_MS,
-    MAX_RELEASE_MS, MAX_WEIGHT, MIN_ATTACK_MS, MIN_HOLD_TIME_MS, MIN_RELEASE_MS, MIN_WEIGHT,
+    AUTOMIX_MAX_CHANNELS, BYPASS_RAMP_MS, DEFAULT_ATTACK_MS, DEFAULT_RELEASE_MS, MAX_ATTACK_MS,
+    MAX_HOLD_TIME_MS, MAX_RELEASE_MS, MAX_WEIGHT, MIN_ATTACK_MS, MIN_HOLD_TIME_MS, MIN_RELEASE_MS,
+    MIN_WEIGHT,
 };
-use crate::gain_sharing::compute_dugan_gains;
+use crate::gain_sharing::compute_shared_gains;
 use crate::last_mic_hold::LastMicHold;
 use crate::nom::NomAttenuation;
+use crate::smoothing::LinearRamp;
 
 /// Global engine parameters.
 struct EngineParams {
@@ -22,7 +24,7 @@ pub struct GlobalMetering {
     pub nom_attenuation_db: f64,
 }
 
-/// Core automix engine implementing the 9-phase Dugan gain-sharing pipeline.
+/// Core automix engine implementing the 9-phase gain-sharing pipeline.
 ///
 /// The channels array is Box-allocated to avoid stack overflow (~150KB per
 /// channel * 32 channels = ~4.8MB).
@@ -32,6 +34,9 @@ pub struct AutomixEngine {
     params: EngineParams,
     last_mic_hold: LastMicHold,
     nom_atten: NomAttenuation,
+    /// 0.0 = fully processed, 1.0 = fully bypassed. Crossfaded rather than
+    /// switched so hitting bypass mid-show does not click.
+    bypass_ramp: LinearRamp,
     pub(crate) global_metering: GlobalMetering,
     sample_counter: u64,
     // Pre-allocated scratch arrays (no heap alloc in process path)
@@ -65,6 +70,7 @@ impl AutomixEngine {
             },
             last_mic_hold: LastMicHold::new(sr),
             nom_atten: NomAttenuation::new(),
+            bypass_ramp: LinearRamp::new(0.0, BYPASS_RAMP_MS, sr),
             global_metering: GlobalMetering::default(),
             sample_counter: 0,
             rms_levels: [0.0; AUTOMIX_MAX_CHANNELS],
@@ -78,7 +84,7 @@ impl AutomixEngine {
         env!("CARGO_PKG_VERSION")
     }
 
-    /// Process a block of audio in-place through the 9-phase Dugan pipeline.
+    /// Process a block of audio in-place through the 9-phase gain-sharing pipeline.
     ///
     /// # Safety
     /// `channel_ptrs` must point to an array of at least `num_channels` valid
@@ -91,11 +97,6 @@ impl AutomixEngine {
     ) {
         let num_ch = num_channels.min(self.num_channels);
         if num_ch == 0 || num_samples == 0 {
-            return;
-        }
-
-        // Global bypass: leave audio unmodified
-        if self.params.global_bypass {
             return;
         }
 
@@ -118,9 +119,13 @@ impl AutomixEngine {
         }
 
         // --- Phase 2: Noise floor tracking ---
+        // The block length goes in so the tracker's time constants stay tied to
+        // wall-clock time instead of the host's buffer size.
         for i in 0..num_ch {
             if self.participating[i] {
-                self.channels[i].noise_floor.update(self.rms_levels[i]);
+                self.channels[i]
+                    .noise_floor
+                    .update(self.rms_levels[i], num_samples);
             }
         }
 
@@ -139,8 +144,8 @@ impl AutomixEngine {
             self.last_mic_hold
                 .update(&self.is_active, &self.participating, num_ch, num_samples);
 
-        // --- Phase 5: Dugan gain-sharing ---
-        let result = compute_dugan_gains(
+        // --- Phase 5: gain-sharing ---
+        let result = compute_shared_gains(
             &self.rms_levels,
             &self.weights,
             &self.is_active,
@@ -156,39 +161,48 @@ impl AutomixEngine {
         // --- Phase 7+8: Per-sample gain smoothing and application ---
         // Compute target gain per channel, then apply the one-pole smoother
         // per-sample while writing the gain-adjusted audio.
+        //
+        // Global bypass is a crossfade toward unity gain rather than an early
+        // return. Because the processing is a pure per-sample gain, blending the
+        // gain toward 1.0 is exactly equivalent to crossfading dry against wet,
+        // and it costs one extra multiply-add instead of a second buffer. Every
+        // channel must see the same ramp position, so each walks a copy and the
+        // master advances once per block, after the loop.
+        let block_start_ramp = self.bypass_ramp;
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..num_ch {
-            let target_gain = if self.participating[i] {
-                result.gains[i] * nom_linear
-            } else if self.channels[i].params.bypassed {
+            // A bypassed channel targets unity and reaches it through the same
+            // smoother as everything else — jumping straight to 1.0 would click.
+            let target_gain = if self.channels[i].params.bypassed {
                 1.0
+            } else if self.participating[i] {
+                result.gains[i] * nom_linear
             } else {
-                0.0 // muted or excluded
+                0.0 // muted or excluded by solo
             };
 
             self.channels[i].raw_gain = target_gain;
 
-            if self.channels[i].params.bypassed {
-                // Bypassed: set smoother to unity immediately, no per-sample work
-                self.channels[i].gain_smoother.set_immediate(1.0);
-                self.channels[i].smoothed_gain = 1.0;
-                // Audio passes through unmodified
-            } else {
-                let buf = std::slice::from_raw_parts_mut(channel_ptrs_slice[i], num_samples);
-                for sample in buf.iter_mut() {
-                    let s = if sample.is_finite() { *sample } else { 0.0 };
-                    let gain = self.channels[i].gain_smoother.process(target_gain);
-                    *sample = s * gain as f32;
-                }
-                self.channels[i].smoothed_gain = self.channels[i].gain_smoother.current();
+            let mut ramp = block_start_ramp;
+            let buf = std::slice::from_raw_parts_mut(channel_ptrs_slice[i], num_samples);
+            for sample in buf.iter_mut() {
+                let s = if sample.is_finite() { *sample } else { 0.0 };
+                let gain = self.channels[i].gain_smoother.process(target_gain);
+                let bypass = ramp.next_value();
+                *sample = (s as f64 * (gain + bypass * (1.0 - gain))) as f32;
             }
+            self.channels[i].smoothed_gain = self.channels[i].gain_smoother.current();
         }
+
+        self.bypass_ramp.advance(num_samples);
 
         // --- Phase 9: Update counters + metering snapshots ---
         self.sample_counter += num_samples as u64;
 
+        let bypass_amount = self.bypass_ramp.current();
         for i in 0..num_ch {
-            self.channels[i].update_metering(self.rms_levels[i]);
+            self.channels[i].update_metering(self.rms_levels[i], bypass_amount);
         }
 
         self.global_metering.nom_count = result.nom;
@@ -223,6 +237,13 @@ impl AutomixEngine {
 
     pub fn set_global_bypass(&mut self, bypass: bool) {
         self.params.global_bypass = bypass;
+        self.bypass_ramp.set_target(if bypass { 1.0 } else { 0.0 });
+    }
+
+    /// How much of the signal is currently passing through unprocessed, 0.0–1.0.
+    /// Mid-values mean a bypass crossfade is in flight.
+    pub fn bypass_amount(&self) -> f64 {
+        self.bypass_ramp.current()
     }
 
     pub fn set_attack_ms(&mut self, ms: f64) {
@@ -293,18 +314,162 @@ mod tests {
         );
     }
 
+    /// Largest sample-to-sample jump in a buffer. A gain discontinuity shows up
+    /// here as a spike far above the per-sample step of any smooth ramp.
+    fn max_sample_delta(buf: &[f32]) -> f32 {
+        buf.windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max)
+    }
+
     #[test]
-    fn global_bypass_passthrough() {
+    fn global_bypass_settles_to_passthrough() {
         let mut engine = AutomixEngine::new(2, 48000.0);
         engine.set_global_bypass(true);
 
-        let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
+        // The bypass crossfade is 15ms; at 48kHz that is 720 samples, so a few
+        // 256-sample blocks are needed before it is fully engaged.
+        for _ in 0..8 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
 
+        let mut buffers = vec![vec![0.5_f32; 256], vec![0.3_f32; 256]];
         unsafe { process_test_block(&mut engine, &mut buffers, 256) };
 
-        // Audio should be unmodified
         assert_eq!(buffers[0], vec![0.5_f32; 256]);
         assert_eq!(buffers[1], vec![0.3_f32; 256]);
+    }
+
+    #[test]
+    fn engaging_global_bypass_does_not_click() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+
+        // Converge on a processed state where the gain is well below unity, so
+        // switching to passthrough is a large jump if it is not ramped.
+        for _ in 0..400 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        let mut settled = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+        unsafe { process_test_block(&mut engine, &mut settled, 256) };
+        let processed_level = settled[0][255];
+        assert!(
+            processed_level < 0.4,
+            "expected gain-sharing to pull two equal channels well below unity, got \
+             {processed_level}"
+        );
+
+        // A one-sample switch to passthrough would step by roughly
+        // 0.5 - processed_level. Ramped over 720 samples it must be far smaller.
+        let click_threshold = (0.5 - processed_level) * 0.05;
+        engine.set_global_bypass(true);
+
+        for _ in 0..8 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+            let delta = max_sample_delta(&buffers[0]);
+            assert!(
+                delta < click_threshold,
+                "bypass transition stepped by {delta}, threshold {click_threshold}"
+            );
+        }
+    }
+
+    #[test]
+    fn releasing_global_bypass_does_not_click() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+        engine.set_global_bypass(true);
+        for _ in 0..400 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        engine.set_global_bypass(false);
+        for _ in 0..8 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+            let delta = max_sample_delta(&buffers[0]);
+            assert!(delta < 0.02, "un-bypass transition stepped by {delta}");
+        }
+    }
+
+    #[test]
+    fn engaging_channel_bypass_does_not_click() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+
+        for _ in 0..400 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        engine.set_channel_bypass(0, true);
+        for _ in 0..8 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.5_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+            let delta = max_sample_delta(&buffers[0]);
+            assert!(delta < 0.02, "channel bypass transition stepped by {delta}");
+        }
+    }
+
+    /// Gain sharing normalises to sum 1.0, so N equal talkers each land at 1/N.
+    /// The regression this guards is layering NOM attenuation on top, which made
+    /// it N^-1.5 and dropped the whole mix by 10*log10(N) dB.
+    #[test]
+    fn equal_channels_each_get_one_over_n() {
+        for n in [2_usize, 4, 8] {
+            let mut engine = AutomixEngine::new(n, 48000.0);
+            let amplitude = 0.5_f32;
+
+            for _ in 0..600 {
+                let mut buffers = vec![vec![amplitude; 256]; n];
+                unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+            }
+
+            let mut final_buf = vec![vec![amplitude; 256]; n];
+            unsafe { process_test_block(&mut engine, &mut final_buf, 256) };
+
+            let expected = amplitude / n as f32;
+            let actual = final_buf[0][255];
+            assert!(
+                (actual - expected).abs() < expected * 0.1,
+                "n={n}: expected ~{expected}, got {actual}"
+            );
+
+            // And the gains across all channels still sum to unity.
+            let sum: f32 = final_buf.iter().map(|b| b[255]).sum::<f32>() / amplitude;
+            assert!(
+                (sum - 1.0).abs() < 0.1,
+                "n={n}: gains summed to {sum}, expected ~1.0"
+            );
+        }
+    }
+
+    #[test]
+    fn metering_stays_live_while_bypassed() {
+        let mut engine = AutomixEngine::new(2, 48000.0);
+        engine.set_global_bypass(true);
+
+        for _ in 0..200 {
+            let mut buffers = vec![vec![0.5_f32; 256], vec![0.1_f32; 256]];
+            unsafe { process_test_block(&mut engine, &mut buffers, 256) };
+        }
+
+        // Level detection must keep running under bypass, otherwise the meters
+        // freeze the moment an operator hits bypass.
+        let m = engine.channel_metering(0).unwrap();
+        assert!(
+            m.input_rms_db > -10.0 && m.input_rms_db < 0.0,
+            "input metering went stale under bypass: {}",
+            m.input_rms_db
+        );
+        // And the reported gain is what is actually heard: unity.
+        assert!(
+            m.gain_db.abs() < 0.01,
+            "bypassed channel should meter 0 dB of gain, got {}",
+            m.gain_db
+        );
     }
 
     #[test]

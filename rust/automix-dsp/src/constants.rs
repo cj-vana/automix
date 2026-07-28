@@ -9,11 +9,19 @@ pub const AUTOMIX_MAX_BLOCK_SIZE: usize = 4096;
 /// Default RMS detection window in milliseconds.
 pub(crate) const DEFAULT_RMS_WINDOW_MS: f64 = 20.0;
 
-/// Default noise floor rise time in milliseconds (fast tracking downward).
-pub(crate) const DEFAULT_NOISE_FLOOR_RISE_MS: f64 = 500.0;
+/// How fast the noise floor tracks *down* toward a quieter room, in ms.
+pub(crate) const NOISE_FLOOR_FALL_MS: f64 = 500.0;
 
-/// Default noise floor fall time in milliseconds (slow tracking upward).
-pub(crate) const DEFAULT_NOISE_FLOOR_FALL_MS: f64 = 5000.0;
+/// How fast the noise floor tracks *up* toward a louder room while the channel
+/// is idle, in ms.
+pub(crate) const NOISE_FLOOR_RISE_MS: f64 = 5000.0;
+
+/// How fast the noise floor tracks up while the channel is carrying signal.
+///
+/// Deliberately far slower than the idle rise: speech must not drag the floor
+/// up behind it, but the tracker still has to rise eventually or a room whose
+/// ambient level genuinely increases latches the channel open forever.
+pub(crate) const NOISE_FLOOR_RISE_ACTIVE_MS: f64 = 60_000.0;
 
 /// Default noise floor margin above tracked floor, in dB.
 pub(crate) const DEFAULT_NOISE_FLOOR_MARGIN_DB: f64 = 6.0;
@@ -29,6 +37,12 @@ pub(crate) const DEFAULT_RELEASE_MS: f64 = 150.0;
 
 /// Default last-mic-hold time in milliseconds.
 pub(crate) const DEFAULT_HOLD_TIME_MS: f64 = 500.0;
+
+/// Crossfade time for global bypass, in milliseconds.
+///
+/// Short enough to feel instant to an operator hitting bypass mid-show, long
+/// enough that the gain discontinuity is inaudible rather than a click.
+pub(crate) const BYPASS_RAMP_MS: f64 = 15.0;
 
 /// Small value to prevent division by zero.
 pub(crate) const EPSILON: f64 = 1e-10;

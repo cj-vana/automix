@@ -88,23 +88,17 @@ impl Channel {
     }
 
     /// Update metering snapshot from current state.
-    pub fn update_metering(&mut self, input_rms: f64) {
+    ///
+    /// `bypass_amount` is the engine-wide bypass crossfade position (0.0–1.0).
+    /// The meters report the gain the listener actually hears, so a bypassed
+    /// channel reads 0 dB rather than whatever the automixer computed.
+    pub fn update_metering(&mut self, input_rms: f64, bypass_amount: f64) {
+        let effective_gain = self.smoothed_gain + bypass_amount * (1.0 - self.smoothed_gain);
         self.metering.input_rms_db = linear_to_db(input_rms);
-        self.metering.gain_db = linear_to_db(self.smoothed_gain);
-        self.metering.output_rms_db = linear_to_db(input_rms * self.smoothed_gain);
+        self.metering.gain_db = linear_to_db(effective_gain);
+        self.metering.output_rms_db = linear_to_db(input_rms * effective_gain);
         self.metering.noise_floor_db = self.noise_floor.floor_db();
         self.metering.is_active = self.is_active;
-    }
-
-    /// Reset channel state (preserves params).
-    pub fn reset(&mut self, sample_rate: f64) {
-        self.level_detector.reset();
-        self.noise_floor.reset(sample_rate);
-        self.gain_smoother.reset();
-        self.raw_gain = 0.0;
-        self.smoothed_gain = 0.0;
-        self.is_active = false;
-        self.metering = ChannelMetering::default();
     }
 
     /// Update smoothing coefficients.

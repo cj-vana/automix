@@ -30,13 +30,6 @@ struct TestEngine
 
     AutomixEngine* get() { return engine; }
     const AutomixEngine* get() const { return engine; }
-
-    AutomixEngine* release()
-    {
-        auto* e = engine;
-        engine = nullptr;
-        return e;
-    }
 };
 
 /// Helper to create and manage audio test buffers.
@@ -66,3 +59,22 @@ struct TestBuffer
     uint32_t numChannels() const { return static_cast<uint32_t> (channels.size()); }
     uint32_t numSamples() const { return channels.empty() ? 0 : static_cast<uint32_t> (channels[0].size()); }
 };
+
+/// Run `blocks` blocks of steady input through the engine so the gain smoothers
+/// and the noise floor settle.
+///
+/// Processing is in place, so the buffer has to be refilled every block.
+/// Re-processing the same buffer feeds the previous block's already-attenuated
+/// output back in, which converges somewhere else entirely.
+inline void converge (TestEngine& engine,
+                      uint32_t numChannels,
+                      uint32_t numSamples,
+                      float level,
+                      int blocks)
+{
+    for (int i = 0; i < blocks; ++i)
+    {
+        TestBuffer buf (numChannels, numSamples, level);
+        automix_process (engine.get(), buf.data(), buf.numChannels(), buf.numSamples());
+    }
+}

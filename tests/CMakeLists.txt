@@ -16,6 +16,8 @@ add_executable(AutoMixFFITests
     ffi_nan_test.cpp
 )
 
+set_automix_warnings(AutoMixFFITests)
+
 target_include_directories(AutoMixFFITests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/rust/automix-dsp/include"
@@ -36,6 +38,5 @@ if(APPLE)
     )
 endif()
 
-include(CTest)
 include(Catch)
 catch_discover_tests(AutoMixFFITests)

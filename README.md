@@ -17,14 +17,20 @@ AutoMix automatically manages the gain of multiple microphone inputs using a gai
 
 - **Gain-sharing algorithm** with configurable per-channel weights
 - **Up to 32 input channels** with independent controls
-- **NOM (Number of Open Mics) attenuation** for feedback control
 - **Adaptive noise floor tracking** that adjusts to room conditions
 - **Last-mic-hold** prevents ambient noise pumping
-- **Per-channel solo/mute/bypass** controls
-- **Modern dark UI** with real-time metering (input, gain reduction, output)
-- **AES67 network audio** receive capability (standalone mode)
-- **AU plugin** for Logic Pro, GarageBand, and other AU hosts
-- **Standalone app** with direct audio device I/O
+- **Per-channel weight, solo, mute, and bypass**
+- **Console-style metering** with per-channel input level, gain reduction, and an open-mic
+  indicator, plus a running count of how many mics are open
+- **Click-free bypass**, global and per channel, crossfaded rather than switched, so it is
+  safe to hit during a show
+- **AU plugin** for AU hosts, and a **standalone app** with direct audio device I/O
+
+Optional NOM (number of open mics) attenuation is available but off by default. Gain sharing
+already normalises the channel gains to sum to unity, which is what holds the loop gain
+constant as more mics open. Layering the classic `-10*log10(NOM)` on top attenuates a second
+time and drops the mix further with every talker. Turn it on only if you want to trade level
+for extra feedback margin.
 
 ## Architecture
 
@@ -74,9 +80,19 @@ cmake --build build --config Release
 ### Testing
 
 ```bash
-cargo test --manifest-path rust/automix-dsp/Cargo.toml   # Rust DSP tests
-ctest --test-dir build --output-on-failure                # C++ integration tests
-cargo miri test --manifest-path rust/automix-dsp/Cargo.toml  # Memory safety
+# Rust DSP tests
+cargo test --manifest-path rust/automix-dsp/Cargo.toml
+
+# C++ FFI tests. These only exist if the build was configured with testing on,
+# which is the default; ctest reports "No tests were found" otherwise.
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build --config Release
+ctest --test-dir build --output-on-failure
+
+# Memory safety. miri is nightly-only and the repo pins stable, so ask for the
+# toolchain explicitly:
+#   rustup toolchain install nightly && rustup +nightly component add miri
+cargo +nightly miri test --manifest-path rust/automix-dsp/Cargo.toml
 ```
 
 ## DAW Setup

@@ -1,9 +1,11 @@
 fn main() {
     let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    // Only re-run when FFI-relevant sources change
-    println!("cargo:rerun-if-changed=src/ffi.rs");
-    println!("cargo:rerun-if-changed=src/constants.rs");
+    // cbindgen parses the whole crate, so narrowing this to ffi.rs and
+    // constants.rs let the committed header drift: moving a #[repr(C)] struct
+    // or a pub const into any other module changed the ABI without
+    // regenerating it. Watch the entire source tree instead.
+    println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=cbindgen.toml");
 
     // Ensure the output directory exists

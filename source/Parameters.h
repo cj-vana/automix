@@ -96,10 +96,15 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
         [] (float v, int) { return juce::String (v, 0) + " ms"; },
         [] (const juce::String& s) { return s.getFloatValue(); }));
 
+    // Off by default. Gain sharing already normalises the channel gains to sum
+    // to 1.0, which is what holds the loop gain constant as more mics open;
+    // layering the classic -10*log10(NOM) on top attenuates a second time and
+    // the error grows with the number of talkers. Left available for operators
+    // who want extra feedback margin in a difficult room.
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { nomAttenID, 1 },
-        "NOM Attenuation",
-        true));
+        "Extra NOM Attenuation",
+        false));
 
     return layout;
 }

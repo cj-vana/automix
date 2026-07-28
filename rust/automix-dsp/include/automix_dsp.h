@@ -12,7 +12,7 @@
 // Maximum block size in samples.
 #define AUTOMIX_MAX_BLOCK_SIZE 4096
 
-// Core automix engine implementing the 9-phase Dugan gain-sharing pipeline.
+// Core automix engine implementing the 9-phase gain-sharing pipeline.
 //
 // The channels array is Box-allocated to avoid stack overflow (~150KB per
 // channel * 32 channels = ~4.8MB).

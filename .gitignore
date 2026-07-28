@@ -7,7 +7,6 @@ cmake-build-*/
 
 # Rust
 rust/automix-dsp/target/
-rust/automix-aes67/target/
 
 # Generated headers
 generated/

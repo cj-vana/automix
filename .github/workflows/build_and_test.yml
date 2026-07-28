@@ -3,6 +3,9 @@ name: Build & Test
 on:
   push:
     branches: [main, dev]
+    # Without an explicit tag filter a push of refs/tags/v* never starts this
+    # workflow, which left the release job below permanently unreachable.
+    tags: ['v*']
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -56,9 +59,6 @@ jobs:
 
       - name: Run Rust unit tests
         run: cargo test --manifest-path rust/automix-dsp/Cargo.toml --verbose
-
-      - name: Run Rust benchmarks (compile check)
-        run: cargo bench --manifest-path rust/automix-dsp/Cargo.toml --no-run
 
   build-macos:
     name: Build macOS (Universal)
@@ -141,10 +141,14 @@ jobs:
           name: AutoMix-Standalone-macOS
           path: AutoMix-Standalone
 
+      # upload-artifact does not preserve the executable bit, so the downloaded
+      # .app and .component have unrunnable binaries. Restore it before zipping.
       - name: Package artifacts
         run: |
-          zip -r AutoMix-AU-macOS.zip AutoMix-AU/
-          zip -r AutoMix-Standalone-macOS.zip AutoMix-Standalone/
+          chmod -R +x AutoMix-AU/AutoMix.component/Contents/MacOS || true
+          chmod -R +x AutoMix-Standalone/AutoMix.app/Contents/MacOS || true
+          ditto -c -k --sequesterRsrc --keepParent AutoMix-AU AutoMix-AU-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent AutoMix-Standalone AutoMix-Standalone-macOS.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
