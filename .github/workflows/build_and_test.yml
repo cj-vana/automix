@@ -157,3 +157,26 @@ jobs:
             AutoMix-AU-macOS.zip
             AutoMix-Standalone-macOS.zip
           generate_release_notes: true
+          body: |
+            Universal binary (arm64 + x86_64), macOS 12 or later.
+
+            ## Install
+
+            - **AU plugin** — unzip and put `AutoMix.component` in
+              `~/Library/Audio/Plug-Ins/Components/`, then restart your host.
+            - **Standalone** — unzip and move `AutoMix.app` to `/Applications`.
+
+            ## Gatekeeper
+
+            These builds are ad-hoc signed and **not** notarized, so macOS will refuse to
+            open them on first launch. To get past it:
+
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/AutoMix.app
+            xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/AutoMix.component
+            ```
+
+            Only run that on a download you trust. Notarization needs a paid Apple Developer
+            account, which this project does not currently have.
+
+            ---

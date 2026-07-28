@@ -34,16 +34,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Release archives lost the executable bit, so the published app could not launch.
 
 ### Added
-- Console-style interface: per-channel segmented level meter with a gain-reduction ladder,
-  open-mic lamp, weight fader, and mute/solo/bypass, against a shared dB scale.
+- Broadcast-console interface, replacing a placeholder that drew one line of text.
+  - Gain-share distribution bar: one segment per open mic, sized to its share. The shares
+    are normalised to sum to 1.0, so the bar is always full and only its division moves.
+  - Per-channel strips: input level and gain reduction as adjacent vertical bars, gain
+    readout, weight, and solo/mute/bypass.
+  - Aggregate readouts for open-mic count, NOM attenuation, system gain, and the adaptive
+    noise floor.
+  - Thirty-second open-mic history, so it is possible to see after the fact whether a mic
+    ever opened or was chattering.
+  - Archivo and IBM Plex Mono are compiled in, subset to the glyphs the panel draws
+    (46 KB for five faces). Both SIL OFL 1.1; licences in `assets/fonts`.
+  - Resizes 800×400 to 2400×1400, dropping secondary rows as height runs short.
 - `getBypassParameter()` override, so host bypass drives the crossfade instead of hard-
   switching the plugin out of the signal path.
 - Meters fall to the floor when the host stops processing, rather than freezing at the last
   reading.
+- Offscreen snapshot tool (`-DAUTOMIX_BUILD_SNAPSHOT=ON`) that renders the editor to a PNG
+  at any size and channel count, with meters driven by synthetic audio. Deterministic
+  output, so it works as a visual regression check.
 
 ### Changed
 - Build drives `cargo` and `lipo` directly for universal binaries. Corrosion was removed
   because it does not support macOS universal builds.
+- The algorithm is described generically as gain sharing. The commercial automixer this was
+  previously named after is a trademark the project makes no claim to.
+
+### Notes
+- Release binaries are ad-hoc signed and **not** notarized. macOS Gatekeeper will warn on
+  first open; see the release notes for how to get past it.
 
 ## [0.1.1] - 2026-02-09
 

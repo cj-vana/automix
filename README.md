@@ -13,6 +13,26 @@ AutoMix automatically manages the gain of multiple microphone inputs using a gai
 
 **Built for:** live broadcast panels, conference rooms, theater, podcasts, house of worship
 
+![AutoMix mixer view](docs/images/automix-mixer.png)
+
+The gain-share bar across the top is the algorithm made visible: one segment per open
+mic, sized to its share of the mix. The shares always sum to 1.000, which is what holds
+the system gain constant however many mics are open. Below it, each channel shows input
+level and gain reduction side by side, and the history lane keeps the last 30 seconds of
+who was open.
+
+The window runs from 800×400 to 2400×1400. The secondary rows drop out as height runs
+short, leaving the mixer bay.
+
+<details>
+<summary>Compact (800×400) and 32-channel views</summary>
+
+![Compact view](docs/images/automix-compact.png)
+
+![32 channels](docs/images/automix-32ch.png)
+
+</details>
+
 ## Features
 
 - **Gain-sharing algorithm** with configurable per-channel weights
@@ -93,6 +113,20 @@ ctest --test-dir build --output-on-failure
 # toolchain explicitly:
 #   rustup toolchain install nightly && rustup +nightly component add miri
 cargo +nightly miri test --manifest-path rust/automix-dsp/Cargo.toml
+```
+
+### Editor screenshots
+
+The interface renders offscreen, so a design change can be checked without launching the
+standalone app and fighting the window manager for a screenshot. Output is deterministic:
+the same arguments always produce a byte-identical PNG.
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAUTOMIX_BUILD_SNAPSHOT=ON
+cmake --build build --target AutoMixSnapshot
+
+# <out.png> [width] [height] [channels]
+./build/AutoMixSnapshot_artefacts/Release/AutoMixSnapshot docs/images/automix-mixer.png 1200 700 16
 ```
 
 ## DAW Setup
