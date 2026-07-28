@@ -4,7 +4,7 @@
 
 ![Build](https://github.com/cj-vana/automix/actions/workflows/build_and_test.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.3.0-green.svg)
+![Version](https://img.shields.io/badge/version-0.3.1-green.svg)
 ![macOS](https://img.shields.io/badge/platform-macOS_12%2B-lightgrey.svg)
 
 ---
