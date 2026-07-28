@@ -64,6 +64,11 @@ jobs:
     name: Build macOS (Universal)
     runs-on: macos-14
     needs: rust-tests
+    env:
+      # Secrets are absent on pull requests from forks, so signing has to be
+      # conditional or every outside contribution fails the build.
+      SIGNING_AVAILABLE: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_API_ISSUER_ID != '' }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,17 +114,88 @@ jobs:
       - name: Run C++ tests (Catch2)
         run: ctest --test-dir build --output-on-failure -C ${{ env.BUILD_TYPE }}
 
+      # Signing material lives in a throwaway keychain that is deleted in the
+      # cleanup step below, so nothing persists on the runner.
+      - name: Import signing certificate
+        if: env.IS_TAG == 'true' && env.SIGNING_AVAILABLE == 'true'
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign blocks on a GUI prompt that can never be
+          # answered on a headless runner.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -c "Developer ID Application"
+
+      - name: Sign, notarize, and package
+        if: env.IS_TAG == 'true' && env.SIGNING_AVAILABLE == 'true'
+        env:
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+          export SIGN_IDENTITY="Developer ID Application: Christopher Vana ($TEAM_ID)"
+          export NOTARY_KEY="$RUNNER_TEMP/AuthKey.p8"
+
+          ART="build/AutoMix_artefacts/${{ env.BUILD_TYPE }}"
+          ./packaging/sign-and-notarize.sh "$ART/AU/AutoMix.component" AutoMix-AU-macOS.zip
+          ./packaging/sign-and-notarize.sh "$ART/Standalone/AutoMix.app" AutoMix-Standalone-macOS.zip
+
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      # Unsigned fallback so branch and PR builds still produce something to
+      # download and test with.
+      - name: Package (unsigned)
+        if: env.IS_TAG != 'true' || env.SIGNING_AVAILABLE != 'true'
+        run: |
+          set -euo pipefail
+          ART="build/AutoMix_artefacts/${{ env.BUILD_TYPE }}"
+          ditto -c -k --sequesterRsrc --keepParent "$ART/AU/AutoMix.component" AutoMix-AU-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent "$ART/Standalone/AutoMix.app" AutoMix-Standalone-macOS.zip
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN:-}" && -f "${KEYCHAIN:-}" ]]; then
+            security delete-keychain "$KEYCHAIN" || true
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/AuthKey.p8" || true
+
+      # Zips, not bundles: upload-artifact does not preserve the executable bit
+      # or symlinks, which silently produced an unlaunchable .app in the v0.3.0
+      # release. Archiving before upload keeps the bundle intact.
       - name: Upload AU artifact
         uses: actions/upload-artifact@v4
         with:
           name: AutoMix-AU-macOS
-          path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/AU/
+          path: AutoMix-AU-macOS.zip
 
       - name: Upload Standalone artifact
         uses: actions/upload-artifact@v4
         with:
           name: AutoMix-Standalone-macOS
-          path: build/AutoMix_artefacts/${{ env.BUILD_TYPE }}/Standalone/
+          path: AutoMix-Standalone-macOS.zip
 
   release:
     name: Create Release
@@ -129,26 +205,31 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The archives arrive already signed, notarized, and stapled from
+      # build-macos, so this job only attaches them.
       - name: Download AU artifact
         uses: actions/download-artifact@v4
         with:
           name: AutoMix-AU-macOS
-          path: AutoMix-AU
 
       - name: Download Standalone artifact
         uses: actions/download-artifact@v4
         with:
           name: AutoMix-Standalone-macOS
-          path: AutoMix-Standalone
 
-      # upload-artifact does not preserve the executable bit, so the downloaded
-      # .app and .component have unrunnable binaries. Restore it before zipping.
-      - name: Package artifacts
+      - name: Verify the archives are notarized
         run: |
-          chmod -R +x AutoMix-AU/AutoMix.component/Contents/MacOS || true
-          chmod -R +x AutoMix-Standalone/AutoMix.app/Contents/MacOS || true
-          ditto -c -k --sequesterRsrc --keepParent AutoMix-AU AutoMix-AU-macOS.zip
-          ditto -c -k --sequesterRsrc --keepParent AutoMix-Standalone AutoMix-Standalone-macOS.zip
+          set -euo pipefail
+          for z in AutoMix-AU-macOS.zip AutoMix-Standalone-macOS.zip; do
+            rm -rf verify && mkdir verify
+            ditto -x -k "$z" verify
+            BUNDLE="$(find verify -maxdepth 1 -mindepth 1 -print -quit)"
+            echo "== $z"
+            codesign --verify --deep --strict --verbose=2 "$BUNDLE"
+            # A stapled ticket is what lets an offline machine open it. If this
+            # fails, the release would ship something Gatekeeper still blocks.
+            xcrun stapler validate "$BUNDLE"
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -166,17 +247,16 @@ jobs:
               `~/Library/Audio/Plug-Ins/Components/`, then restart your host.
             - **Standalone** — unzip and move `AutoMix.app` to `/Applications`.
 
-            ## Gatekeeper
+            Signed with a Developer ID certificate, notarized by Apple, and stapled, so
+            these open without a Gatekeeper warning and without any `xattr` workaround.
+            The ticket is attached to the bundle, so it also works offline.
 
-            These builds are ad-hoc signed and **not** notarized, so macOS will refuse to
-            open them on first launch. To get past it:
+            To check for yourself:
 
             ```bash
-            xattr -dr com.apple.quarantine /Applications/AutoMix.app
-            xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/AutoMix.component
+            codesign --verify --deep --strict --verbose=2 /Applications/AutoMix.app
+            xcrun stapler validate /Applications/AutoMix.app
+            spctl -a -vvv -t install /Applications/AutoMix.app
             ```
-
-            Only run that on a download you trust. Notarization needs a paid Apple Developer
-            account, which this project does not currently have.
 
             ---

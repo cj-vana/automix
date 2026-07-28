@@ -87,7 +87,47 @@ git push origin v0.3.0
 ```
 
 The tag push runs `build_and_test.yml`, which builds the universal binaries, runs both test
-suites, and publishes a GitHub Release with the AU and standalone archives attached.
+suites, signs and notarizes the bundles, and publishes a GitHub Release with the archives
+attached.
+
+### Signing and notarization
+
+Tag builds are signed with a Developer ID certificate and notarized by Apple. Branch and PR
+builds are not: the secrets are unavailable to forks, so those produce unsigned archives and
+the signing steps are skipped rather than failing.
+
+Five repository secrets drive it:
+
+| Secret | What |
+| --- | --- |
+| `APPLE_CERT_P12` | Developer ID Application certificate and key, base64 of a `.p12` |
+| `APPLE_CERT_PASSWORD` | Password the `.p12` was exported with |
+| `APPLE_API_KEY_P8` | Contents of the App Store Connect `AuthKey_XXXX.p8` |
+| `APPLE_API_KEY_ID` | The `XXXX` from that filename |
+| `APPLE_API_ISSUER_ID` | Issuer UUID, from App Store Connect → Users and Access → Integrations |
+| `APPLE_TEAM_ID` | Ten-character team identifier |
+
+The release job refuses to publish anything that is not stapled, so a missing or expired
+credential fails the build instead of quietly shipping something Gatekeeper blocks.
+
+To sign locally, which is worth doing before trusting a release:
+
+```bash
+export SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export NOTARY_KEY=~/.appstoreconnect/private_keys/AuthKey_XXXX.p8
+export NOTARY_KEY_ID=XXXX
+export NOTARY_ISSUER_ID=<uuid>
+
+./packaging/sign-and-notarize.sh \
+  build/AutoMix_artefacts/Release/Standalone/AutoMix.app \
+  AutoMix-Standalone-macOS.zip
+```
+
+Omit the three `NOTARY_*` variables to sign without notarizing, which is fast and enough to
+check that the entitlements and hardened runtime are right.
+
+The certificate expires. When it does, export a new one and update the two cert secrets;
+nothing else changes.
 
 Artifact upload to GitHub occasionally times out. If the run fails on
 `Failed to FinalizeArtifact`, re-run the failed job; nothing about the build is wrong.

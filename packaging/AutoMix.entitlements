@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	    The standalone app opens an input device directly, so under the hardened
+	    runtime it needs this or CoreAudio hands it silence. The AU is signed
+	    with the same entitlements for simplicity; inside a host it inherits the
+	    host's own microphone grant, so the entitlement is harmless there.
+
+	    Nothing else is requested. Library validation stays on: a host that
+	    loads plugins signed by other teams needs
+	    com.apple.security.cs.disable-library-validation on its own binary, not
+	    on ours.
+	-->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Release binaries are signed with a Developer ID certificate, notarized by Apple, and
+  stapled, so they open without a Gatekeeper warning and without the `xattr` workaround the
+  0.3.0 notes described. The stapled ticket means it also works on a machine that is offline
+  or behind a firewall that blocks Apple.
+- `packaging/sign-and-notarize.sh`, which runs the same way locally and in CI, and
+  `packaging/AutoMix.entitlements`.
+
+### Fixed
+- The hardened runtime was never actually applied. `juce_add_plugin` sets
+  `HARDENED_RUNTIME_ENABLED`, but that maps to an Xcode build setting and does nothing under
+  the Ninja generator this project builds with, so the flag silently had no effect.
+  Signing now sets `--options runtime` explicitly, which notarization requires.
+- Release archives are built before upload rather than after download. `upload-artifact`
+  preserves neither the executable bit nor symlinks, which is what produced the unlaunchable
+  bundles worked around in 0.3.0.
+
 ## [0.3.0] - 2026-07-27
 
 ### Added
