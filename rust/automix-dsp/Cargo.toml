@@ -1,6 +1,6 @@
 [package]
 name = "automix-dsp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Gain-sharing automatic microphone mixer DSP core"
 license = "MIT"
