@@ -102,6 +102,25 @@ set(AUTOMIX_FFI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/include/aut
 # ---- Melatonin Inspector (debug GUI tool) ----
 add_subdirectory(modules/melatonin_inspector)
 
+# ---- Embedded fonts ----
+# Archivo and IBM Plex Mono carry the interface's typography and neither ships
+# with macOS, so they are compiled in rather than resolved at runtime. Both are
+# SIL OFL 1.1; the licences sit beside them in assets/fonts. Each file is
+# subset to Latin plus the handful of symbols the panel draws, which takes the
+# five faces from 848 KB to 46 KB.
+juce_add_binary_data(AutoMixFonts
+    HEADER_NAME AutoMixBinary.h
+    NAMESPACE AutoMixBinary
+    SOURCES
+        assets/fonts/Archivo-Medium.ttf
+        assets/fonts/Archivo-SemiBold.ttf
+        assets/fonts/Archivo-Bold.ttf
+        assets/fonts/IBMPlexMono-Medium.ttf
+        assets/fonts/IBMPlexMono-SemiBold.ttf
+)
+
+set_target_properties(AutoMixFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # ---- Plugin target ----
 juce_add_plugin(AutoMix
     COMPANY_NAME "AutoMix"
@@ -131,9 +150,15 @@ target_sources(AutoMix
         source/PluginEditor.cpp
         source/PluginEditor.h
         source/Parameters.h
+        source/gui/AutomixFonts.cpp
+        source/gui/AutomixFonts.h
         source/gui/AutomixTheme.h
         source/gui/ChannelStrip.cpp
         source/gui/ChannelStrip.h
+        source/gui/GainShareBar.cpp
+        source/gui/GainShareBar.h
+        source/gui/OpenMicHistory.cpp
+        source/gui/OpenMicHistory.h
 )
 
 target_include_directories(AutoMix
@@ -145,6 +170,7 @@ target_include_directories(AutoMix
 target_link_libraries(AutoMix
     PRIVATE
         automix_dsp
+        AutoMixFonts
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_gui_extra
@@ -172,6 +198,38 @@ set_automix_warnings(AutoMix)
 # ---- On macOS, link system frameworks needed by Rust std ----
 if(APPLE)
     target_link_libraries(AutoMix PRIVATE "-framework Security" "-framework CoreFoundation")
+endif()
+
+# ---- Offscreen snapshot tool ----
+# Renders the editor to a PNG without opening a window, so the interface can be
+# reviewed deterministically and in CI. Off by default; it links the plugin's
+# shared code, so it only builds when asked for.
+option(AUTOMIX_BUILD_SNAPSHOT "Build the offscreen editor snapshot tool" OFF)
+
+if(AUTOMIX_BUILD_SNAPSHOT)
+    juce_add_console_app(AutoMixSnapshot PRODUCT_NAME "AutoMixSnapshot")
+
+    target_sources(AutoMixSnapshot PRIVATE tools/snapshot/Snapshot.cpp)
+
+    target_include_directories(AutoMixSnapshot
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/source"
+            "${CMAKE_CURRENT_SOURCE_DIR}/rust/automix-dsp/include"
+    )
+
+    target_link_libraries(AutoMixSnapshot
+        PRIVATE
+            AutoMix
+            juce::juce_gui_extra
+        PUBLIC
+            juce::juce_recommended_config_flags
+    )
+
+    set_automix_warnings(AutoMixSnapshot)
+
+    if(APPLE)
+        target_link_libraries(AutoMixSnapshot PRIVATE "-framework Security" "-framework CoreFoundation")
+    endif()
 endif()
 
 # ---- Tests ----

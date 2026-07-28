@@ -1,33 +1,19 @@
 #pragma once
 
 #include "../PluginProcessor.h"
+#include "AutomixFonts.h"
 #include "AutomixTheme.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
-/// Vertical zones of a channel strip.
+/// One channel column of the mixer bay, following design option 1a.
 ///
-/// Shared so the dB scale beside the bay lands on the same pixels as the meters
-/// it labels. Computing it in two places is how a scale drifts one row off and
-/// quietly lies about the levels.
-struct StripLayout
-{
-    juce::Rectangle<int> cap;         // channel number band
-    juce::Rectangle<int> lamp;        // open indicator
-    juce::Rectangle<int> meter;       // level + gain reduction well
-    juce::Rectangle<int> readout;     // dB text
-    juce::Rectangle<int> weight;      // fader
-    juce::Rectangle<int> weightLabel;
-    juce::Rectangle<int> buttons;     // mute / solo / bypass
-
-    static StripLayout compute (juce::Rectangle<int> bounds);
-};
-
-/// One vertical channel strip: open lamp, segmented level meter with a
-/// gain-reduction ladder beside it, dB readout, weight fader, and M/S/B.
+/// Top to bottom: channel number and a state badge, the channel label, twin
+/// vertical bars (input level filling upward in lime, gain reduction filling
+/// downward in coral), the applied gain, the weight, and S/M/B.
 ///
-/// Meter values arrive from the audio thread via the processor's atomics. The
-/// strip repaints only the region those values affect, so a 32-channel bay at
-/// 30 Hz does not repaint the whole window sixty times a second.
+/// The two bars run side by side rather than overlaid so neither has to be read
+/// through the other, and gain reduction hangs from the top the way it does on
+/// a compressor, so "more bar" reads as "more taken away".
 class ChannelStrip : public juce::Component
 {
 public:
@@ -37,40 +23,47 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    /// Push a new meter frame. `audioRunning` false means the host has stopped
-    /// calling processBlock, which is not the same as the input being silent —
-    /// the meters fall to the floor instead of freezing at their last reading.
-    void updateMeters (const AutomixProcessor::ChannelMeterData& data, bool audioRunning);
+    /// Push a meter frame. `audioRunning` false means the host stopped calling
+    /// processBlock, which is not the same as silence: the bars fall to the
+    /// floor rather than freezing at their last reading.
+    void updateMeters (const AutomixProcessor::ChannelMeterData&, bool audioRunning);
+
+    bool isOpen() const { return isOpen_; }
+
+    /// Share of the total mix this channel currently holds, 0.0 to 1.0. The
+    /// gain-sharing gains are normalised to sum to one, so the applied linear
+    /// gain is the share.
+    float share() const { return share_; }
 
 private:
-    void paintCap (juce::Graphics&);
-    void paintLamp (juce::Graphics&);
-    void paintMeter (juce::Graphics&);
-    void paintReadout (juce::Graphics&);
+    void paintHeaderRow (juce::Graphics&);
+    void paintLabel (juce::Graphics&);
+    void paintBars (juce::Graphics&);
+    void paintReadouts (juce::Graphics&);
 
     AutomixProcessor& processor_;
     const int channel_;
 
     juce::Slider weightSlider_;
-    juce::TextButton muteButton_ { "M" };
     juce::TextButton soloButton_ { "S" };
+    juce::TextButton muteButton_ { "M" };
     juce::TextButton bypassButton_ { "B" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> weightAttach_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteAttach_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloAttach_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteAttach_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttach_;
 
-    // Displayed values, decayed toward the incoming reading so the meter has
-    // ballistics instead of flickering between blocks.
+    // Displayed values, eased toward the incoming reading so the bars have
+    // ballistics instead of flickering block to block.
     float displayInputDb_ = AutomixTheme::meterFloorDb;
     float displayGainDb_  = 0.0f;
-    float displayFloorDb_ = AutomixTheme::meterFloorDb;
     float peakHoldDb_     = AutomixTheme::meterFloorDb;
     int   peakHoldFrames_ = 0;
+    float share_          = 0.0f;
     bool  isOpen_         = false;
 
-    StripLayout layout_;
+    juce::Rectangle<int> headerRow_, labelRow_, barsArea_, gainRow_, weightRow_, buttonRow_;
     juce::Rectangle<int> dynamicBounds_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelStrip)

@@ -4,117 +4,66 @@ namespace
 {
 using namespace AutomixTheme;
 
-constexpr int headerHeight  = 92;
-constexpr int footerHeight  = 26;
-constexpr int scaleWidth    = 38;
-constexpr int minStripWidth = 56;
-constexpr int maxStripWidth = 150;
-
-/// Comfortable strip width used to pick the initial window size, so a two-input
-/// device does not open a window built for thirty-two.
-constexpr int nominalStripWidth = 74;
+constexpr int minStripWidth = 46;
+constexpr int maxStripWidth = 112;
+constexpr int nominalStrip  = 66;
 
 /// Frames of the 30 Hz timer with no new audio block before the meters are
 /// treated as stale. Two frames of slack absorbs a late block without the
 /// display flickering to silence.
 constexpr int idleFramesBeforeStale = 3;
 
+/// Height below which the secondary rows are dropped. The mixer bay is the one
+/// thing that must survive at 800×400.
+constexpr int minHeightForTopRow  = 470;
+constexpr int minHeightForHistory = 660;
+
+void styleChip (juce::TextButton& b, juce::uint32 onColour, juce::uint32 onText)
+{
+    b.setClickingTogglesState (true);
+    b.setColour (juce::TextButton::buttonColourId, colour (chipBg));
+    b.setColour (juce::TextButton::buttonOnColourId, colour (onColour));
+    b.setColour (juce::TextButton::textColourOffId, colour (textDim));
+    b.setColour (juce::TextButton::textColourOnId, colour (onText));
+}
+
 void styleKnob (juce::Slider& s, juce::Component& parent)
 {
     s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 14);
-    s.setColour (juce::Slider::rotarySliderFillColourId, colour (micOpen));
-    s.setColour (juce::Slider::rotarySliderOutlineColourId, colour (meterWell));
+    s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    s.setColour (juce::Slider::rotarySliderFillColourId, colour (accent));
+    s.setColour (juce::Slider::rotarySliderOutlineColourId, colour (wellBg));
     s.setColour (juce::Slider::thumbColourId, colour (textPrimary));
-    s.setColour (juce::Slider::textBoxTextColourId, colour (textDim));
-    s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     parent.addAndMakeVisible (s);
 }
-
-void drawKnobLabel (juce::Graphics& g, const juce::Slider& s, const juce::String& text)
-{
-    g.setColour (colour (textFaint));
-    g.setFont (labelFont (8.5f, true));
-    g.drawText (text,
-                juce::Rectangle<int> (s.getX(), s.getY() - 12, s.getWidth(), 10),
-                juce::Justification::centred,
-                false);
-}
-
-/// Small all-caps caption used to name a zone of the panel.
-void drawCaption (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& text)
-{
-    g.setColour (colour (textFaint));
-    g.setFont (labelFont (8.5f, true));
-    g.drawText (text, area, juce::Justification::centredLeft, false);
-}
 } // namespace
-
-void MeterScale::paint (juce::Graphics& g)
-{
-    // Same vertical zones as a strip, so the ticks line up with the segments.
-    const auto layout = StripLayout::compute (getLocalBounds().reduced (0, 5));
-    const auto meter = layout.meter.reduced (0, 2);
-
-    g.setColour (colour (textFaint));
-    g.setFont (monoFont (8.5f));
-
-    for (float db = 0.0f; db >= meterFloorDb; db -= 10.0f)
-    {
-        const int y = meter.getBottom()
-                      - juce::roundToInt (dbToNorm (db) * (float) meter.getHeight());
-
-        g.setColour (colour (hairline));
-        g.fillRect (getWidth() - 6, y, 5, 1);
-
-        g.setColour (colour (textFaint));
-        g.drawText (juce::String (juce::roundToInt (db)),
-                    juce::Rectangle<int> (0, y - 6, getWidth() - 8, 12),
-                    juce::Justification::centredRight,
-                    false);
-    }
-
-    g.setColour (colour (textFaint));
-    g.setFont (labelFont (7.5f, true));
-    g.drawText ("dBFS", layout.readout, juce::Justification::centredRight, false);
-}
 
 AutomixEditor::AutomixEditor (AutomixProcessor& p)
     : AudioProcessorEditor (p), processor_ (p)
 {
-    // The header needs roughly 900px before its groups start colliding, so that
-    // is the floor regardless of channel count.
     const int channels = juce::jlimit (1, AutomixProcessor::kMaxChannels,
                                        processor_.getTotalNumInputChannels());
-    const int wanted = scaleWidth + channels * nominalStripWidth + 24;
-    setSize (juce::jlimit (940, 1680, wanted), 660);
+    setSize (juce::jlimit (1000, 1680, 90 + channels * nominalStrip), 700);
     setResizable (true, true);
-    setResizeLimits (900, 500, 2600, 1400);
+    setResizeLimits (800, 400, 2400, 1400);
 
-    addAndMakeVisible (scale_);
+    addAndMakeVisible (shareBar_);
+    addAndMakeVisible (history_);
 
     stripViewport_.setViewedComponent (&stripContainer_, false);
     stripViewport_.setScrollBarsShown (false, true);
-    stripViewport_.setScrollBarThickness (10);
+    stripViewport_.setScrollBarThickness (9);
     addAndMakeVisible (stripViewport_);
 
-    bypassButton_.setClickingTogglesState (true);
-    bypassButton_.setColour (juce::TextButton::buttonColourId, colour (buttonIdle));
-    bypassButton_.setColour (juce::TextButton::buttonOnColourId, colour (muteOn));
-    bypassButton_.setColour (juce::TextButton::textColourOffId, colour (textDim));
-    bypassButton_.setColour (juce::TextButton::textColourOnId, colour (0xff0b0c0d));
-    bypassButton_.setTooltip ("Bypass the automixer. Crossfades over 15 ms, so it is safe mid-show.");
+    styleChip (bypassButton_, warn, pageBg);
+    bypassButton_.setTooltip ("Bypass the automixer. Crossfades over 15 ms, so it is safe "
+                              "to hit mid-show.");
     addAndMakeVisible (bypassButton_);
 
-    nomAttenButton_.setClickingTogglesState (true);
-    nomAttenButton_.setColour (juce::TextButton::buttonColourId, colour (buttonIdle));
-    nomAttenButton_.setColour (juce::TextButton::buttonOnColourId, colour (gainReduce));
-    nomAttenButton_.setColour (juce::TextButton::textColourOffId, colour (textDim));
-    nomAttenButton_.setColour (juce::TextButton::textColourOnId, colour (0xff0b0c0d));
+    styleChip (nomAttenButton_, warn, pageBg);
     nomAttenButton_.setTooltip ("Extra -10*log10(NOM) attenuation on top of gain sharing. "
-                                "Off by default: gain sharing already holds the loop gain "
-                                "constant, so this trades level for feedback margin.");
+                                "Off by default: the shares already sum to one, so this "
+                                "trades level for feedback margin.");
     addAndMakeVisible (nomAttenButton_);
 
     styleKnob (attackSlider_, *this);
@@ -139,8 +88,7 @@ AutomixEditor::AutomixEditor (AutomixProcessor& p)
     holdAttach_ = std::make_unique<SliderAttach> (
         apvts, AutomixParams::holdMsID, holdSlider_);
 
-    rebuildStrips (juce::jmax (1, processor_.getTotalNumInputChannels()));
-
+    rebuildStrips (channels);
     lastBlockCounter_ = processor_.getBlockCounter();
     startTimerHz (30);
 }
@@ -161,12 +109,17 @@ void AutomixEditor::rebuildStrips (int numChannels)
         stripContainer_.addAndMakeVisible (strips_.add (new ChannelStrip (processor_, ch)));
 
     stripCount_ = numChannels;
+    history_.setChannelCount (numChannels);
     layoutStrips();
 }
 
 void AutomixEditor::timerCallback()
 {
-    // A channel count change means the host renegotiated the bus layout.
+    refresh();
+}
+
+void AutomixEditor::refresh (double frameSeconds)
+{
     rebuildStrips (juce::jmax (1, processor_.getTotalNumInputChannels()));
 
     const uint32_t counter = processor_.getBlockCounter();
@@ -182,60 +135,147 @@ void AutomixEditor::timerCallback()
     const bool running = idleFrames_ < idleFramesBeforeStale;
 
     int openCount = 0;
+    float floorSum = 0.0f;
+    int floorCount = 0;
+    std::vector<bool> open ((size_t) strips_.size(), false);
+    std::vector<GainShareBar::Segment> segments;
+
     for (int ch = 0; ch < strips_.size(); ++ch)
     {
         const auto data = processor_.getChannelMeterData (ch);
         strips_[ch]->updateMeters (data, running);
+
         if (running && data.isActive)
+        {
             ++openCount;
+            open[(size_t) ch] = true;
+            segments.push_back ({ ch, strips_[ch]->share() });
+        }
+
+        if (data.noiseFloorDb > -119.0f)
+        {
+            floorSum += data.noiseFloorDb;
+            ++floorCount;
+        }
     }
 
+    // The shares are normalised to sum to one; the total is the system gain, and
+    // seeing it hold at 0 dB as mics open is the whole point of gain sharing.
+    float shareTotal = 0.0f;
+    for (const auto& s : segments)
+        shareTotal += s.share;
+
+    const float newSystemGainDb =
+        shareTotal > 0.0001f ? juce::Decibels::gainToDecibels (shareTotal, -60.0f) : 0.0f;
+    const float newFloorDb = floorCount > 0 ? floorSum / (float) floorCount : -60.0f;
+
+    shareBar_.setSegments (std::move (segments));
+
+    if (showHistory_)
+        history_.pushFrame (open, strips_.size(), frameSeconds);
+
     const auto global = processor_.getGlobalMeterData();
-    const bool statusChanged = openCount != openChannelCount_
-                               || running != audioRunning_
-                               || std::abs (global.nomCount - globalMeter_.nomCount) > 0.05f
-                               || std::abs (global.nomAttenuationDb
-                                            - globalMeter_.nomAttenuationDb) > 0.05f;
+    const bool statsChanged = openCount != openChannelCount_
+                              || running != audioRunning_
+                              || std::abs (global.nomCount - globalMeter_.nomCount) > 0.05f
+                              || std::abs (global.nomAttenuationDb
+                                           - globalMeter_.nomAttenuationDb) > 0.05f
+                              || std::abs (newSystemGainDb - systemGainDb_) > 0.05f
+                              || std::abs (newFloorDb - noiseFloorDb_) > 0.5f;
 
     openChannelCount_ = openCount;
     globalMeter_ = global;
+    systemGainDb_ = newSystemGainDb;
+    noiseFloorDb_ = newFloorDb;
     audioRunning_ = running;
 
-    // The strips repaint themselves; only the header's numbers need us.
-    if (statusChanged)
+    // The strips and the two panels repaint themselves; only the chrome that
+    // holds these numbers needs us.
+    if (statsChanged)
     {
         repaint (statusBounds_);
-        repaint (footerBounds_);
+        if (showTopRow_)
+        {
+            repaint (statsPanel_);
+            repaint (sharePanel_);
+        }
     }
 }
 
 void AutomixEditor::resized()
 {
     auto area = getLocalBounds();
-    headerBounds_ = area.removeFromTop (headerHeight);
-    footerBounds_ = area.removeFromBottom (footerHeight);
 
-    scale_.setBounds (area.removeFromLeft (scaleWidth));
+    statusBounds_ = area.removeFromTop (headerHeight);
+
+    area.removeFromTop (bodyPadTop);
+    area.removeFromBottom (bodyPadBot);
+    area = area.withTrimmedLeft (bodyPadX).withTrimmedRight (bodyPadX);
+
+    showTopRow_ = getHeight() >= minHeightForTopRow;
+    showHistory_ = getHeight() >= minHeightForHistory;
+
+    // ---- Status bar controls ----
+    auto status = statusBounds_.reduced (bodyPadX, 0);
+    bypassButton_.setBounds (status.removeFromRight (74).withSizeKeepingCentre (74, 22));
+    status.removeFromRight (7);
+    nomAttenButton_.setBounds (status.removeFromRight (82).withSizeKeepingCentre (82, 22));
+
+    // ---- Top row ----
+    if (showTopRow_)
+    {
+        auto top = area.removeFromTop (topRowHeight);
+        area.removeFromTop (panelGap);
+
+        responsePanel_ = top.removeFromRight (responseWidth);
+        top.removeFromRight (panelGap);
+        statsPanel_ = top.removeFromRight (statsWidth);
+        top.removeFromRight (panelGap);
+        sharePanel_ = top;
+
+        // Share bar sits in the middle band of its panel, under the caption and
+        // above the legend.
+        auto barArea = sharePanel_.reduced (14, 12);
+        barArea.removeFromTop (16);
+        barArea.removeFromBottom (18);
+        shareBar_.setBounds (barArea.withHeight (juce::jmin (38, barArea.getHeight())));
+
+        // The caption takes the first band, then a gap for the per-knob labels
+        // that paintResponsePanel draws just above each control.
+        auto knobs = responsePanel_.reduced (14, 12);
+        knobs.removeFromTop (30);
+        knobs.removeFromBottom (14);
+        const int knobW = juce::jmax (1, knobs.getWidth() / 3);
+        attackSlider_.setBounds (knobs.removeFromLeft (knobW).reduced (6, 0));
+        releaseSlider_.setBounds (knobs.removeFromLeft (knobW).reduced (6, 0));
+        holdSlider_.setBounds (knobs.reduced (6, 0));
+    }
+    else
+    {
+        sharePanel_ = statsPanel_ = responsePanel_ = {};
+        shareBar_.setBounds ({});
+        attackSlider_.setBounds ({});
+        releaseSlider_.setBounds ({});
+        holdSlider_.setBounds ({});
+    }
+
+    shareBar_.setVisible (showTopRow_);
+    attackSlider_.setVisible (showTopRow_);
+    releaseSlider_.setVisible (showTopRow_);
+    holdSlider_.setVisible (showTopRow_);
+
+    // ---- History ----
+    history_.setVisible (showHistory_);
+    if (showHistory_)
+    {
+        history_.setBounds (area.removeFromBottom (historyHeight));
+        area.removeFromBottom (panelGap);
+    }
+
+    // ---- Mixer bay ----
+    bayHeader_ = area.removeFromTop (14);
+    area.removeFromTop (6);
     stripViewport_.setBounds (area);
-
-    auto header = headerBounds_.reduced (16, 0);
-    header.removeFromLeft (168);                        // wordmark, painted
-    header.removeFromLeft (8);
-
-    bypassButton_.setBounds (header.removeFromLeft (92).withSizeKeepingCentre (92, 40));
-    header.removeFromLeft (20);
-    statusBounds_ = header.removeFromLeft (210);
-
-    controlBounds_ = header.removeFromRight (juce::jmin (header.getWidth(), 320));
-    auto controls = controlBounds_.reduced (8, 16);
-
-    nomAttenButton_.setBounds (controls.removeFromRight (76).withSizeKeepingCentre (76, 26));
-    controls.removeFromRight (12);
-
-    const int knobWidth = juce::jmax (1, controls.getWidth() / 3);
-    attackSlider_.setBounds (controls.removeFromLeft (knobWidth).reduced (2, 0));
-    releaseSlider_.setBounds (controls.removeFromLeft (knobWidth).reduced (2, 0));
-    holdSlider_.setBounds (controls.reduced (2, 0));
 
     layoutStrips();
 }
@@ -246,145 +286,245 @@ void AutomixEditor::layoutStrips()
         return;
 
     const int available = juce::jmax (0, stripViewport_.getWidth());
-    const int fitted = available / strips_.size();
+    const int gap = 4;
+    const int fitted = (available - gap * (strips_.size() - 1)) / strips_.size();
     const int stripWidth = juce::jlimit (minStripWidth, maxStripWidth, fitted);
-    const int totalWidth = stripWidth * strips_.size();
+    const int totalWidth = stripWidth * strips_.size() + gap * (strips_.size() - 1);
 
-    // Only reserve room for the scrollbar when the bay actually overflows.
     const int viewportHeight = stripViewport_.getHeight();
     const int containerHeight = totalWidth > available
-                                    ? juce::jmax (0, viewportHeight - 10)
+                                    ? juce::jmax (0, viewportHeight - 9)
                                     : viewportHeight;
 
     stripContainer_.setBounds (0, 0, juce::jmax (totalWidth, available), containerHeight);
 
     for (int i = 0; i < strips_.size(); ++i)
-        strips_[i]->setBounds (i * stripWidth, 0, stripWidth, containerHeight);
+        strips_[i]->setBounds (i * (stripWidth + gap), 0, stripWidth, containerHeight);
 }
 
 void AutomixEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (colour (background));
+    g.fillAll (colour (pageBg));
 
-    // The bay sits in a well so the strips read as inserted into a frame.
-    auto bay = getLocalBounds()
-                   .withTrimmedTop (headerHeight)
-                   .withTrimmedBottom (footerHeight);
-    g.setColour (colour (0xff0e1011));
-    g.fillRect (bay);
+    paintStatusBar (g);
 
-    paintHeader (g);
-    paintFooter (g);
+    if (showTopRow_)
+    {
+        paintSharePanel (g);
+        paintStatTiles (g);
+        paintResponsePanel (g);
+    }
+
+    paintBayHeader (g);
 }
 
-void AutomixEditor::paintHeader (juce::Graphics& g)
+void AutomixEditor::paintStatusBar (juce::Graphics& g)
 {
-    auto area = headerBounds_;
+    auto area = statusBounds_;
 
-    g.setColour (colour (headerFill));
+    g.setColour (colour (panelBg));
     g.fillRect (area);
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
-    g.fillRect (area.getX(), area.getBottom() - 2, area.getWidth(), 2);
-    g.setColour (colour (micOpen).withAlpha (0.5f));
+    g.setColour (borderHeader());
     g.fillRect (area.getX(), area.getBottom() - 1, area.getWidth(), 1);
 
-    // ---- Identity ----
-    auto wordmark = area.reduced (16, 0).removeFromLeft (168);
-    auto title = wordmark.removeFromTop (area.getHeight() / 2 + 10).withTrimmedTop (22);
-    g.setColour (colour (textPrimary));
-    g.setFont (labelFont (24.0f, true));
-    g.drawText ("AUTOMIX", title, juce::Justification::topLeft, false);
+    auto row = area.reduced (bodyPadX, 0);
 
-    g.setColour (colour (textFaint));
-    g.setFont (monoFont (8.5f));
-    g.drawText ("GAIN-SHARING AUTOMIXER", wordmark, juce::Justification::topLeft, false);
-    g.drawText ("v" AUTOMIX_VERSION, wordmark.withTrimmedTop (11),
-                juce::Justification::topLeft, false);
+    // A 3×3 mark: five lit cells out of nine, the same shape a gain-share
+    // distribution makes.
+    auto mark = row.removeFromLeft (13).withSizeKeepingCentre (13, 13);
+    const bool lit[9] = { true, true, false, false, true, false, true, false, false };
+    for (int i = 0; i < 9; ++i)
+    {
+        const int cx = mark.getX() + (i % 3) * 5;
+        const int cy = mark.getY() + (i / 3) * 5;
+        g.setColour (lit[i] ? colour (accent) : colour (0xff2b3238));
+        g.fillRect (cx, cy, 3, 3);
+    }
 
-    // ---- Status: the two numbers an operator actually watches ----
-    auto status = statusBounds_;
-    drawWell (g, status.reduced (0, 18), headerWell);
+    row.removeFromLeft (12);
+    g.setColour (colour (textBright));
+    g.setFont (fonts().sans (15.0f, AutomixFonts::Weight::bold, 0.18f));
+    g.drawText ("AUTOMIX", row.removeFromLeft (108), juce::Justification::centredLeft, false);
 
-    auto inner = status.reduced (10, 22);
-    auto openRow = inner.removeFromTop (inner.getHeight() / 2 + 4);
+    auto divider = row.removeFromLeft (13).withSizeKeepingCentre (1, 16);
+    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.fillRect (divider);
 
-    drawCaption (g, openRow.removeFromTop (11), "OPEN MICS");
+    // The algorithm is described generically. Naming a commercial automixer
+    // here would be a trademark claim the project does not make.
+    drawValue (g, "GAIN-SHARING " + middot() + " " + juce::String (stripCount_) + " CH",
+               row.removeFromLeft (190), textFaint, 9.0f, AutomixFonts::Weight::medium);
 
-    const bool anyOpen = openChannelCount_ > 0;
-    g.setColour (anyOpen ? colour (micOpen) : colour (textFaint));
-    g.setFont (monoFont (28.0f, true));
-    auto bigNumber = openRow.removeFromLeft (48);
-    g.drawText (juce::String (openChannelCount_).paddedLeft ('0', 2),
-                bigNumber, juce::Justification::centredLeft, false);
+    // Right side: real device facts only. There is no preset system, so the
+    // design's preset chip has nothing truthful to show and is left out.
+    auto right = row;
+    right.removeFromRight (74 + 7 + 82 + 10);   // the two buttons, placed in resized()
 
-    g.setColour (colour (textDim));
-    g.setFont (monoFont (12.0f));
-    g.drawText ("of " + juce::String (stripCount_), openRow,
-                juce::Justification::centredLeft, false);
+    const auto sr = processor_.getSampleRate();
+    const auto bs = processor_.getBlockSize();
+    if (sr > 0.0)
+    {
+        auto chip = right.removeFromRight (108).withSizeKeepingCentre (108, 22);
+        g.setColour (colour (chipBg));
+        g.fillRoundedRectangle (chip.toFloat(), 3.0f);
+        g.setColour (chipOutline());
+        g.drawRoundedRectangle (chip.toFloat().reduced (0.5f), 3.0f, 1.0f);
+        drawValue (g, juce::String (sr / 1000.0, 1) + " kHz / " + juce::String (bs),
+                   chip, textPrimary, 9.0f, AutomixFonts::Weight::semiBold,
+                   juce::Justification::centred);
+        right.removeFromRight (8);
+    }
 
-    drawCaption (g, inner.removeFromLeft (30), "NOM");
-    g.setColour (colour (textPrimary));
-    g.setFont (monoFont (11.0f));
-    g.drawText (juce::String (globalMeter_.nomCount, 1) + "    "
-                    + juce::String (globalMeter_.nomAttenuationDb, 1) + " dB",
-                inner, juce::Justification::centredLeft, false);
-
-    // ---- Control group ----
-    // No group caption here: the three knob labels sit on the same line and a
-    // "RESPONSE" heading collided with them.
-    drawWell (g, controlBounds_.reduced (0, 12), headerWell);
-
-    drawKnobLabel (g, attackSlider_, "ATTACK");
-    drawKnobLabel (g, releaseSlider_, "RELEASE");
-    drawKnobLabel (g, holdSlider_, "HOLD");
+    // ACTIVE / BYPASSED state badge.
+    const bool bypassed = bypassButton_.getToggleState();
+    auto badge = right.removeFromRight (74).withSizeKeepingCentre (74, 22);
+    g.setColour (bypassed ? colour (chipBg) : colour (accent));
+    g.fillRoundedRectangle (badge.toFloat(), 3.0f);
+    if (bypassed)
+    {
+        g.setColour (chipOutline());
+        g.drawRoundedRectangle (badge.toFloat().reduced (0.5f), 3.0f, 1.0f);
+    }
+    g.setColour (bypassed ? colour (textFaint) : colour (pageBg));
+    g.setFont (fonts().sans (9.0f, AutomixFonts::Weight::semiBold, 0.14f));
+    g.drawText (bypassed ? "BYPASSED" : (audioRunning_ ? "ACTIVE" : "NO AUDIO"),
+                badge, juce::Justification::centred, false);
 }
 
-void AutomixEditor::paintFooter (juce::Graphics& g)
+void AutomixEditor::paintSharePanel (juce::Graphics& g)
 {
-    auto area = footerBounds_;
-    g.setColour (colour (headerFill));
-    g.fillRect (area);
-    g.setColour (colour (hairline));
-    g.fillRect (area.getX(), area.getY(), area.getWidth(), 1);
+    drawPanel (g, sharePanel_);
 
-    auto row = area.reduced (16, 0);
+    auto inner = sharePanel_.reduced (14, 12);
+    auto caption = inner.removeFromTop (14);
 
-    // The status dot is drawn rather than typed. A literal bullet glyph depends
-    // on the source file's encoding surviving the toolchain, and it does not
-    // reliably: it rendered as "å".
-    const auto statusColour = audioRunning_ ? colour (levelLow) : colour (textFaint);
-    auto dot = row.removeFromLeft (14).withSizeKeepingCentre (7, 7).toFloat();
-    g.setColour (statusColour);
-    if (audioRunning_)
-        g.fillEllipse (dot);
-    else
-        g.drawEllipse (dot, 1.0f);
+    drawLabel (g, "GAIN SHARE DISTRIBUTION", caption.removeFromLeft (200),
+               textDim, 10.0f, 0.16f);
+    drawValue (g, "SUM = " + juce::String (juce::jmin (1.0f, [this]
+               {
+                   float t = 0.0f;
+                   for (auto* s : strips_) t += s->share();
+                   return t;
+               }()), 3) + " " + middot() + " CONSTANT SYSTEM GAIN",
+               caption, textFaintest, 9.0f, AutomixFonts::Weight::medium,
+               juce::Justification::centredRight);
 
-    g.setFont (labelFont (9.0f, true));
-    g.setColour (statusColour);
-    g.drawText (audioRunning_ ? "AUDIO" : "NO AUDIO",
-                row.removeFromLeft (76), juce::Justification::centredLeft, false);
+    // Legend along the bottom: the largest contributors, named.
+    auto legend = inner.removeFromBottom (14);
+    std::vector<std::pair<int, float>> top;
+    for (int i = 0; i < strips_.size(); ++i)
+        if (strips_[i]->share() > 0.001f)
+            top.emplace_back (i, strips_[i]->share());
 
-    g.setColour (colour (textFaint));
-    g.setFont (labelFont (9.0f));
-    g.drawText (juce::String (stripCount_) + " channels", row.removeFromLeft (110),
-                juce::Justification::centredLeft, false);
+    std::sort (top.begin(), top.end(),
+               [] (const auto& a, const auto& b) { return a.second > b.second; });
+    if (top.size() > 4)
+        top.resize (4);
 
-    // Legend: without it the two ladders in every strip are unexplained.
-    auto legend = row.removeFromRight (300);
-    g.setFont (labelFont (8.5f, true));
-
-    auto swatch = [&g, &legend] (juce::uint32 c, const juce::String& text)
+    for (const auto& [ch, share] : top)
     {
-        auto box = legend.removeFromLeft (12).withSizeKeepingCentre (7, 7);
-        g.setColour (colour (c));
-        g.fillRect (box);
-        g.setColour (colour (textFaint));
-        g.drawText (text, legend.removeFromLeft (juce::jmin (86, legend.getWidth())),
-                    juce::Justification::centredLeft, false);
+        auto cell = legend.removeFromLeft (juce::jmin (108, legend.getWidth()));
+        auto swatch = cell.removeFromLeft (11).withSizeKeepingCentre (7, 7);
+        g.setColour (colour (accent));
+        g.fillRect (swatch);
+        drawLabel (g, "CH " + juce::String (ch + 1), cell.removeFromLeft (40),
+                   textSecond, 10.0f, 0.0f);
+        drawValue (g, juce::String (juce::roundToInt (share * 100.0f)) + "%",
+                   cell, textFaint, 10.0f, AutomixFonts::Weight::semiBold);
+        legend.removeFromLeft (5);
+    }
+}
+
+void AutomixEditor::paintStatTiles (juce::Graphics& g)
+{
+    struct Tile
+    {
+        juce::String top, bottom, value;
+        juce::uint32 valueColour;
     };
 
-    swatch (levelLow, "INPUT LEVEL");
-    swatch (gainReduce, "GAIN REDUCTION");
-    swatch (micOpen, "OPEN");
+    // The NOM figure is always computed, but it only reaches the audio path
+    // when the operator asks for it. Showing it in coral either way would imply
+    // the mix is being attenuated when it is not, so an unapplied figure is
+    // greyed and labelled as available rather than active.
+    const bool nomApplied = nomAttenButton_.getToggleState();
+
+    const Tile tiles[4] = {
+        { "NUMBER OF", "OPEN MICS", juce::String (openChannelCount_), accent },
+        { "NOM ATTEN.", nomApplied ? "dB APPLIED" : "dB NOT APPLIED",
+          juce::String (globalMeter_.nomAttenuationDb, 1), nomApplied ? warn : textFaintest },
+        { "SYSTEM", "GAIN dB", juce::String (systemGainDb_, 1), textPrimary },
+        { "NOISE FLOOR", "ADAPTIVE", juce::String (juce::roundToInt (noiseFloorDb_)), textPrimary },
+    };
+
+    const int gap = 7;
+    const int tileW = (statsPanel_.getWidth() - gap) / 2;
+    const int tileH = (statsPanel_.getHeight() - gap) / 2;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        juce::Rectangle<int> cell (statsPanel_.getX() + (i % 2) * (tileW + gap),
+                                   statsPanel_.getY() + (i / 2) * (tileH + gap),
+                                   tileW, tileH);
+        drawPanel (g, cell);
+
+        auto inner = cell.reduced (11, 9);
+        drawLabel (g, tiles[i].top, inner.removeFromTop (10), textFaint, 8.0f, 0.12f);
+        drawLabel (g, tiles[i].bottom, inner.removeFromTop (10), textFaint, 8.0f, 0.12f);
+
+        g.setColour (colour (tiles[i].valueColour));
+        g.setFont (fonts().mono (22.0f, AutomixFonts::Weight::semiBold));
+        g.drawText (tiles[i].value, inner, juce::Justification::bottomLeft, false);
+    }
+}
+
+void AutomixEditor::paintResponsePanel (juce::Graphics& g)
+{
+    drawPanel (g, responsePanel_);
+
+    auto inner = responsePanel_.reduced (14, 12);
+    drawLabel (g, "RESPONSE", inner.removeFromTop (14), textDim, 10.0f, 0.16f);
+
+    // The design put three A/B/C mix groups here. The plugin has no grouping
+    // feature, so this panel carries the timing controls instead rather than
+    // showing a control that does nothing.
+    struct Knob { const juce::Slider* s; const char* label; juce::String value; };
+    const Knob knobs[3] = {
+        { &attackSlider_,  "ATTACK",  juce::String (attackSlider_.getValue(), 1) + " ms" },
+        { &releaseSlider_, "RELEASE", juce::String (releaseSlider_.getValue(), 0) + " ms" },
+        { &holdSlider_,    "HOLD",    juce::String (holdSlider_.getValue(), 0) + " ms" },
+    };
+
+    for (const auto& k : knobs)
+    {
+        if (k.s->getWidth() <= 0)
+            continue;
+
+        juce::Rectangle<int> label (k.s->getX(), k.s->getY() - 12, k.s->getWidth(), 10);
+        drawLabel (g, k.label, label, textFaint, 8.0f, 0.12f, juce::Justification::centred);
+
+        juce::Rectangle<int> value (k.s->getX(), k.s->getBottom() + 1, k.s->getWidth(), 12);
+        drawValue (g, k.value, value, textPrimary, 10.0f,
+                   AutomixFonts::Weight::semiBold, juce::Justification::centred);
+    }
+}
+
+void AutomixEditor::paintBayHeader (juce::Graphics& g)
+{
+    auto row = bayHeader_;
+
+    drawLabel (g, "CHANNELS", row.removeFromLeft (78), textDim, 10.0f, 0.16f);
+    row.removeFromLeft (6);
+
+    auto swatchLabel = [&g, &row] (juce::uint32 c, const juce::String& text)
+    {
+        auto swatch = row.removeFromLeft (11).withSizeKeepingCentre (6, 6);
+        g.setColour (colour (c));
+        g.fillRect (swatch);
+        drawLabel (g, text, row.removeFromLeft (88), textFaintest, 9.0f, 0.0f);
+        row.removeFromLeft (6);
+    };
+
+    swatchLabel (accent, "Input level");
+    swatchLabel (warn, "Gain reduction");
 }

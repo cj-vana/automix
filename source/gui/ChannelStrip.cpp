@@ -4,106 +4,47 @@ namespace
 {
 using namespace AutomixTheme;
 
-// Meter ballistics, in frames of the editor's 30 Hz refresh.
-constexpr float riseRate     = 0.65f; // fraction of the gap closed per frame going up
-constexpr float fallRate     = 0.22f; // slower down, so short peaks stay readable
-constexpr int   peakHoldTime = 22;    // ~0.7 s before the peak marker starts falling
+// Bar ballistics, in frames of the editor's 30 Hz refresh.
+constexpr float riseRate     = 0.65f;
+constexpr float fallRate     = 0.22f;
+constexpr int   peakHoldTime = 22;
 constexpr float peakFallRate = 0.10f;
 
-/// One-sided smoothing: jump toward a rising value, ease away from a falling one.
 float ballistic (float current, float target)
 {
-    const float rate = target > current ? riseRate : fallRate;
-    return current + rate * (target - current);
+    return current + (target > current ? riseRate : fallRate) * (target - current);
 }
 
 void styleStateButton (juce::TextButton& b, juce::uint32 onColour)
 {
     b.setClickingTogglesState (true);
-    b.setColour (juce::TextButton::buttonColourId, colour (buttonIdle));
+    b.setColour (juce::TextButton::buttonColourId, ghostFill());
     b.setColour (juce::TextButton::buttonOnColourId, colour (onColour));
-    b.setColour (juce::TextButton::textColourOffId, colour (textDim));
-    b.setColour (juce::TextButton::textColourOnId, colour (0xff0b0c0d));
-}
-
-/// Draw a vertical ladder of discrete segments filling `fraction` of `area`.
-///
-/// `fromTop` hangs the fill from the top edge, which is how gain reduction
-/// reads on a compressor. `segmentColour` is asked for the colour of each lit
-/// segment so the level ladder can change hue as it climbs.
-template <typename ColourForNorm>
-void drawSegments (juce::Graphics& g,
-                   juce::Rectangle<int> area,
-                   float fraction,
-                   bool fromTop,
-                   juce::Colour offColour,
-                   ColourForNorm segmentColour)
-{
-    const int pitch = segmentHeight + segmentGap;
-    const int count = juce::jmax (1, area.getHeight() / pitch);
-    const int lit = juce::roundToInt (juce::jlimit (0.0f, 1.0f, fraction) * (float) count);
-
-    for (int i = 0; i < count; ++i)
-    {
-        // i counts from the filled end so `lit` is a simple prefix.
-        const int y = fromTop ? area.getY() + i * pitch
-                              : area.getBottom() - (i + 1) * pitch + segmentGap;
-
-        const bool on = i < lit;
-        // Midpoint of this segment as a 0..1 position up the ladder.
-        const float norm = ((float) i + 0.5f) / (float) count;
-
-        g.setColour (on ? segmentColour (norm) : offColour);
-        g.fillRect (area.getX(), y, area.getWidth(), segmentHeight);
-    }
+    b.setColour (juce::TextButton::textColourOffId, colour (textFainter));
+    b.setColour (juce::TextButton::textColourOnId, colour (pageBg));
 }
 } // namespace
-
-StripLayout StripLayout::compute (juce::Rectangle<int> bounds)
-{
-    StripLayout l;
-    auto area = bounds;
-
-    l.cap = area.removeFromTop (17);
-    area.removeFromTop (5);
-    l.lamp = area.removeFromTop (9);
-    area.removeFromTop (6);
-
-    l.buttons = area.removeFromBottom (22);
-    area.removeFromBottom (7);
-    l.weightLabel = area.removeFromBottom (10);
-    l.weight = area.removeFromBottom (74);
-    area.removeFromBottom (8);
-    l.readout = area.removeFromBottom (15);
-    area.removeFromBottom (3);
-    l.meter = area;
-
-    return l;
-}
 
 ChannelStrip::ChannelStrip (AutomixProcessor& processor, int channelIndex)
     : processor_ (processor), channel_ (channelIndex)
 {
-    weightSlider_.setSliderStyle (juce::Slider::LinearVertical);
+    weightSlider_.setSliderStyle (juce::Slider::LinearHorizontal);
     weightSlider_.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    weightSlider_.setColour (juce::Slider::backgroundColourId, colour (meterWell));
-    weightSlider_.setColour (juce::Slider::trackColourId, colour (gainReduce));
-    weightSlider_.setColour (juce::Slider::thumbColourId, colour (textPrimary));
+    weightSlider_.setColour (juce::Slider::backgroundColourId, colour (wellBg));
+    weightSlider_.setColour (juce::Slider::trackColourId, colour (textFainter));
+    weightSlider_.setColour (juce::Slider::thumbColourId, colour (textSecond));
     weightSlider_.setTooltip ("Channel " + juce::String (channel_ + 1)
-                             + " weight — bias this mic's share of the mix");
+                             + " weight. Biases this mic's share of the mix.");
     addAndMakeVisible (weightSlider_);
 
-    styleStateButton (muteButton_, muteOn);
-    styleStateButton (soloButton_, soloOn);
-    styleStateButton (bypassButton_, bypassOn);
-    muteButton_.setConnectedEdges (juce::Button::ConnectedOnRight);
-    soloButton_.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
-    bypassButton_.setConnectedEdges (juce::Button::ConnectedOnLeft);
-    muteButton_.setTooltip ("Mute — removes this channel from the mix and from gain-sharing");
-    soloButton_.setTooltip ("Solo — only soloed channels participate");
-    bypassButton_.setTooltip ("Bypass — passes this channel through at unity, unmixed");
-    addAndMakeVisible (muteButton_);
+    styleStateButton (soloButton_, accent);
+    styleStateButton (muteButton_, warn);
+    styleStateButton (bypassButton_, textDim);
+    soloButton_.setTooltip ("Solo. Only soloed channels take part in gain sharing.");
+    muteButton_.setTooltip ("Mute. Removes this channel from the mix and from gain sharing.");
+    bypassButton_.setTooltip ("Bypass. Passes this channel through at unity, unmixed.");
     addAndMakeVisible (soloButton_);
+    addAndMakeVisible (muteButton_);
     addAndMakeVisible (bypassButton_);
 
     auto& apvts = processor_.apvts;
@@ -112,10 +53,10 @@ ChannelStrip::ChannelStrip (AutomixProcessor& processor, int channelIndex)
 
     weightAttach_ = std::make_unique<SliderAttach> (
         apvts, AutomixParams::channelParamID (channel_, "weight"), weightSlider_);
-    muteAttach_ = std::make_unique<ButtonAttach> (
-        apvts, AutomixParams::channelParamID (channel_, "mute"), muteButton_);
     soloAttach_ = std::make_unique<ButtonAttach> (
         apvts, AutomixParams::channelParamID (channel_, "solo"), soloButton_);
+    muteAttach_ = std::make_unique<ButtonAttach> (
+        apvts, AutomixParams::channelParamID (channel_, "mute"), muteButton_);
     bypassAttach_ = std::make_unique<ButtonAttach> (
         apvts, AutomixParams::channelParamID (channel_, "bypass"), bypassButton_);
 }
@@ -132,190 +73,200 @@ void ChannelStrip::updateMeters (const AutomixProcessor::ChannelMeterData& data,
 
     const float newInput = ballistic (displayInputDb_, targetInput);
     const float newGain  = ballistic (displayGainDb_, targetGain);
-    const float newFloor = audioRunning ? juce::jmax (data.noiseFloorDb, meterFloorDb)
-                                        : meterFloorDb;
 
     float newPeak = peakHoldDb_;
-    int   newHoldFrames = peakHoldFrames_;
+    int   newHold = peakHoldFrames_;
     if (newInput >= newPeak)
     {
         newPeak = newInput;
-        newHoldFrames = peakHoldTime;
+        newHold = peakHoldTime;
     }
-    else if (newHoldFrames > 0)
+    else if (newHold > 0)
     {
-        --newHoldFrames;
+        --newHold;
     }
     else
     {
         newPeak += peakFallRate * (newInput - newPeak);
     }
 
-    // Repainting 32 strips at 30 Hz is only cheap if we skip the ones that have
-    // not visibly moved. A tenth of a dB is below what the meter can render.
+    // The gains are normalised to sum to one, so the linear gain of an open
+    // channel is exactly its share of the mix.
+    const float newShare = targetOpen ? juce::Decibels::decibelsToGain (targetGain, -100.0f)
+                                      : 0.0f;
+
     const bool changed = std::abs (newInput - displayInputDb_) > 0.1f
                          || std::abs (newGain - displayGainDb_) > 0.1f
-                         || std::abs (newFloor - displayFloorDb_) > 0.5f
                          || std::abs (newPeak - peakHoldDb_) > 0.1f
                          || targetOpen != isOpen_;
 
     displayInputDb_ = newInput;
     displayGainDb_  = newGain;
-    displayFloorDb_ = newFloor;
     peakHoldDb_     = newPeak;
-    peakHoldFrames_ = newHoldFrames;
+    peakHoldFrames_ = newHold;
+    share_          = newShare;
     isOpen_         = targetOpen;
 
+    // Repaint only the region these values drive. At 32 strips and 30 Hz the
+    // difference between this and a full repaint is the difference between an
+    // idle GUI and a busy one.
     if (changed)
         repaint (dynamicBounds_);
 }
 
 void ChannelStrip::resized()
 {
-    layout_ = StripLayout::compute (getLocalBounds().reduced (3, 5));
-    dynamicBounds_ = layout_.cap.getUnion (layout_.lamp)
-                               .getUnion (layout_.meter)
-                               .getUnion (layout_.readout);
+    auto area = getLocalBounds().reduced (4, 6);
 
-    weightSlider_.setBounds (layout_.weight.withSizeKeepingCentre (
-        juce::jmin (layout_.weight.getWidth(), 20), layout_.weight.getHeight()));
+    headerRow_ = area.removeFromTop (10);
+    area.removeFromTop (5);
+    labelRow_ = area.removeFromTop (21);
+    area.removeFromTop (5);
 
-    auto controls = layout_.buttons;
-    const int buttonWidth = controls.getWidth() / 3;
-    muteButton_.setBounds (controls.removeFromLeft (buttonWidth));
-    soloButton_.setBounds (controls.removeFromLeft (buttonWidth));
-    bypassButton_.setBounds (controls);
+    buttonRow_ = area.removeFromBottom (13);
+    area.removeFromBottom (4);
+    weightRow_ = area.removeFromBottom (10);
+    area.removeFromBottom (3);
+    gainRow_ = area.removeFromBottom (13);
+    area.removeFromBottom (5);
+    barsArea_ = area;
+
+    dynamicBounds_ = headerRow_.getUnion (labelRow_).getUnion (barsArea_).getUnion (gainRow_);
+
+    // Weight rides as a thin track beside its label rather than as a fader: at
+    // this column width a fader would be unusable, and the number is what the
+    // operator actually reads. Taking the track off weightRow_ here leaves the
+    // caption band for paintReadouts.
+    weightSlider_.setBounds (weightRow_.removeFromRight (
+        juce::jlimit (16, 30, weightRow_.getWidth() / 3)));
+
+    auto buttons = buttonRow_;
+    const int w = buttons.getWidth() / 3;
+    soloButton_.setBounds (buttons.removeFromLeft (w).reduced (1, 0));
+    muteButton_.setBounds (buttons.removeFromLeft (w).reduced (1, 0));
+    bypassButton_.setBounds (buttons.reduced (1, 0));
 }
 
 void ChannelStrip::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds();
 
-    g.setColour (colour (channel_ % 2 == 0 ? stripFill : stripFillAlt));
-    g.fillRect (bounds);
+    // An open channel lifts slightly out of the bay and takes a lime edge. That
+    // pairing is the fastest read on the panel: which mics are live, right now.
+    g.setColour (isOpen_ ? juce::Colour (accent).withAlpha (0.07f)
+                         : juce::Colour (panelBg));
+    g.fillRoundedRectangle (bounds.toFloat(), 3.0f);
+    g.setColour (isOpen_ ? juce::Colour (accent).withAlpha (0.45f) : border());
+    g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 3.0f, 1.0f);
 
-    g.setColour (colour (hairline));
-    g.fillRect (bounds.getRight() - 1, bounds.getY(), 1, bounds.getHeight());
-
-    paintCap (g);
-    paintLamp (g);
-    paintMeter (g);
-    paintReadout (g);
-
-    g.setColour (colour (textFaint));
-    g.setFont (labelFont (8.0f, true));
-    g.drawText ("WEIGHT", layout_.weightLabel, juce::Justification::centred, false);
+    paintHeaderRow (g);
+    paintLabel (g);
+    paintBars (g);
+    paintReadouts (g);
 }
 
-void ChannelStrip::paintCap (juce::Graphics& g)
+void ChannelStrip::paintHeaderRow (juce::Graphics& g)
 {
-    // A slightly raised band carrying the channel number, so the eye can count
-    // strips without reading every label.
-    g.setColour (colour (stripCap));
-    g.fillRect (layout_.cap);
-    g.setColour (colour (bevel).withAlpha (0.30f));
-    g.fillRect (layout_.cap.getX(), layout_.cap.getY(), layout_.cap.getWidth(), 1);
+    auto row = headerRow_;
 
-    g.setColour (isOpen_ ? colour (micOpen) : colour (textDim));
-    g.setFont (monoFont (12.0f, true));
-    g.drawText (juce::String (channel_ + 1).paddedLeft ('0', 2),
-                layout_.cap,
-                juce::Justification::centred,
-                false);
-}
+    drawValue (g, juce::String (channel_ + 1).paddedLeft ('0', 2),
+               row.removeFromLeft (16), textFainter, 8.0f,
+               AutomixFonts::Weight::medium);
 
-void ChannelStrip::paintLamp (juce::Graphics& g)
-{
-    const auto bar = layout_.lamp.reduced (4, 1).toFloat();
+    // The badge says why a channel is out of the mix, which is the question
+    // asked when one goes quiet unexpectedly.
+    juce::String badge;
+    juce::uint32 badgeColour = textDim;
+    if (muteButton_.getToggleState())        { badge = "M"; badgeColour = warn; }
+    else if (bypassButton_.getToggleState()) { badge = "B"; badgeColour = textDim; }
+    else if (soloButton_.getToggleState())   { badge = "S"; badgeColour = accent; }
 
-    if (isOpen_)
+    if (badge.isNotEmpty())
     {
-        g.setColour (colour (micOpenSoft));
-        g.fillRoundedRectangle (bar.expanded (2.0f), 3.0f);
-        g.setColour (colour (micOpen));
+        auto chip = row.removeFromRight (11);
+        g.setColour (badgeFill());
+        g.fillRoundedRectangle (chip.toFloat(), 2.0f);
+        drawValue (g, badge, chip, badgeColour, 8.0f,
+                   AutomixFonts::Weight::semiBold, juce::Justification::centred);
     }
-    else
-    {
-        g.setColour (colour (lampOff));
-    }
-    g.fillRoundedRectangle (bar, 1.5f);
 }
 
-void ChannelStrip::paintMeter (juce::Graphics& g)
+void ChannelStrip::paintLabel (juce::Graphics& g)
 {
-    auto area = layout_.meter;
-    if (area.isEmpty())
+    // The plugin has no channel-naming feature, so the design's "HOST MIC"
+    // slot carries the only identity that actually exists.
+    drawLabel (g, "CH " + juce::String (channel_ + 1), labelRow_,
+               isOpen_ ? accent : textFainter, 9.0f, 0.03f,
+               juce::Justification::topLeft);
+}
+
+void ChannelStrip::paintBars (juce::Graphics& g)
+{
+    if (barsArea_.isEmpty())
         return;
 
-    // Level takes the wider left column, gain reduction a narrow right one.
-    // Adjacent rather than overlaid, so neither has to be read through the
-    // other.
-    const int grWidth = juce::jlimit (5, 10, area.getWidth() / 4);
-    auto grColumn = area.removeFromRight (grWidth);
-    area.removeFromRight (3);
-    auto levelColumn = area;
+    const int barWidth = juce::jlimit (7, 11, (barsArea_.getWidth() - 3) / 2);
+    const int totalWidth = barWidth * 2 + 3;
+    auto area = barsArea_.withSizeKeepingCentre (totalWidth, barsArea_.getHeight());
 
-    drawWell (g, levelColumn);
-    drawWell (g, grColumn);
+    auto inputCol = area.removeFromLeft (barWidth);
+    area.removeFromLeft (3);
+    auto grCol = area;
 
-    auto levelInner = levelColumn.reduced (2, 2);
-    auto grInner = grColumn.reduced (2, 2);
+    drawWell (g, inputCol);
+    drawWell (g, grCol);
 
-    drawSegments (g,
-                  levelInner,
-                  dbToNorm (displayInputDb_),
-                  false,
-                  colour (segmentOff),
-                  [] (float norm)
-                  {
-                      return levelColour (meterFloorDb
-                                          + norm * (meterCeilingDb - meterFloorDb));
-                  });
+    // Input level fills upward.
+    const float inNorm = dbToNorm (displayInputDb_);
+    if (inNorm > 0.0f)
+    {
+        const int h = juce::roundToInt (inNorm * (float) inputCol.getHeight());
+        g.setColour (isOpen_ ? colour (accent) : colour (accent).withAlpha (0.35f));
+        g.fillRoundedRectangle (inputCol.removeFromBottom (h).toFloat(), 1.0f);
+    }
 
-    // Gain reduction hangs from the top the way it does on a compressor, so
-    // "more bar" reads as "more attenuation".
-    //
-    // A silent channel is held at full attenuation, which is true but useless to
-    // display: it would peg every idle strip and the wall of bars drowns out the
-    // channels that are actually doing something. Show reduction only where
-    // there is signal to reduce, and dim it until the mic is open.
+    // Peak marker sits above the fill so a transient stays visible after the
+    // level has fallen away from it.
+    if (peakHoldDb_ > meterFloorDb)
+    {
+        const int y = barsArea_.getBottom()
+                      - juce::roundToInt (dbToNorm (peakHoldDb_) * (float) barsArea_.getHeight());
+        g.setColour (colour (textSecond).withAlpha (0.8f));
+        g.fillRect (inputCol.getX(), y, barWidth, 1);
+    }
+
+    // Gain reduction fills downward, and only where there is signal to reduce:
+    // a silent channel is held fully closed, which is true but would peg every
+    // idle column and drown out the ones doing something.
     const bool hasSignal = displayInputDb_ > meterFloorDb + 1.0f;
     const float reductionDb =
         hasSignal ? juce::jlimit (0.0f, maxGainReductionDb, -displayGainDb_) : 0.0f;
-    const auto grColour = isOpen_ ? colour (gainReduce) : colour (gainReduceDim);
-    drawSegments (g,
-                  grInner,
-                  reductionDb / maxGainReductionDb,
-                  true,
-                  colour (segmentOff),
-                  [grColour] (float) { return grColour; });
-
-    // Noise-floor tick: the threshold this channel is being judged against.
-    const int floorY =
-        levelInner.getBottom()
-        - juce::roundToInt (dbToNorm (displayFloorDb_) * (float) levelInner.getHeight());
-    g.setColour (colour (noiseFloorTick));
-    g.fillRect (levelInner.getX(), floorY, levelInner.getWidth(), 1);
-
-    // Peak marker.
-    if (peakHoldDb_ > meterFloorDb)
+    const int grHeight =
+        juce::roundToInt ((reductionDb / maxGainReductionDb) * (float) grCol.getHeight());
+    if (grHeight > 0)
     {
-        const int peakY =
-            levelInner.getBottom()
-            - juce::roundToInt (dbToNorm (peakHoldDb_) * (float) levelInner.getHeight());
-        g.setColour (levelColour (peakHoldDb_).withAlpha (0.9f));
-        g.fillRect (levelInner.getX(), peakY, levelInner.getWidth(), 2);
+        g.setColour (isOpen_ ? colour (warn) : colour (warn).withAlpha (0.35f));
+        g.fillRoundedRectangle (grCol.removeFromTop (grHeight).toFloat(), 1.0f);
     }
 }
 
-void ChannelStrip::paintReadout (juce::Graphics& g)
+void ChannelStrip::paintReadouts (juce::Graphics& g)
 {
-    const bool silent = displayInputDb_ <= meterFloorDb;
-    g.setColour (silent ? colour (textFaint) : colour (textPrimary));
-    g.setFont (monoFont (10.0f));
-    g.drawText (silent ? juce::String ("--")
-                       : juce::String (juce::roundToInt (displayInputDb_)),
-                layout_.readout,
-                juce::Justification::centred,
-                false);
+    const bool silent = displayInputDb_ <= meterFloorDb + 1.0f;
+    const juce::String gainText =
+        silent ? juce::String ("--") : juce::String (displayGainDb_, 1);
+
+    drawValue (g, gainText, gainRow_,
+               silent ? textFaintest : (isOpen_ ? textPrimary : textFainter),
+               10.0f, AutomixFonts::Weight::semiBold, juce::Justification::centred);
+
+    // The weight track is thin at this column width, so the number carries the
+    // value and the track is only there to grab. weightRow_ was already trimmed
+    // by resized() to exclude the track, so what is left is the caption band.
+    auto caption = weightRow_;
+    drawLabel (g, "WT", caption.removeFromLeft (14),
+               textFaintest, 7.0f, 0.06f, juce::Justification::centredLeft);
+    drawValue (g, juce::String (weightSlider_.getValue(), 2), caption,
+               textDim, 7.5f, AutomixFonts::Weight::medium,
+               juce::Justification::centredRight);
 }
