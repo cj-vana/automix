@@ -186,13 +186,13 @@ jobs:
       # or symlinks, which silently produced an unlaunchable .app in the v0.3.0
       # release. Archiving before upload keeps the bundle intact.
       - name: Upload AU artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AutoMix-AU-macOS
           path: AutoMix-AU-macOS.zip
 
       - name: Upload Standalone artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AutoMix-Standalone-macOS
           path: AutoMix-Standalone-macOS.zip
