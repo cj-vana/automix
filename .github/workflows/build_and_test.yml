@@ -208,12 +208,12 @@ jobs:
       # The archives arrive already signed, notarized, and stapled from
       # build-macos, so this job only attaches them.
       - name: Download AU artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: AutoMix-AU-macOS
 
       - name: Download Standalone artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: AutoMix-Standalone-macOS
 
